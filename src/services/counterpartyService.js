@@ -101,6 +101,54 @@ export async function getSupplierStatement(supplierId) {
   return events.reverse();
 }
 
+// ---- Bank accounts (несколько счетов на контрагента) ----
+
+export async function listBankAccounts(counterpartyId) {
+  if (!counterpartyId) return [];
+  const { data, error } = await supabase
+    .from('counterparty_bank_accounts')
+    .select('*')
+    .eq('counterparty_id', counterpartyId)
+    .order('is_primary', { ascending: false })
+    .order('created_at', { ascending: true });
+  if (error) {
+    // Если миграции ещё нет — отдаём пустой массив, чтоб UI не падал
+    const msg = String(error?.message ?? '').toLowerCase();
+    if (msg.includes('counterparty_bank_accounts') && msg.includes('does not exist')) return [];
+    throw error;
+  }
+  return data ?? [];
+}
+
+export async function createBankAccount(row) {
+  const { data, error } = await supabase
+    .from('counterparty_bank_accounts')
+    .insert(row)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateBankAccount(id, patch) {
+  const { data, error } = await supabase
+    .from('counterparty_bank_accounts')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteBankAccount(id) {
+  const { error } = await supabase
+    .from('counterparty_bank_accounts')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+}
+
 export async function paySupplier({ supplierId, organizationId, stationId, amount, date, note, userId }) {
   const { data, error } = await supabase
     .from('supplier_payments')

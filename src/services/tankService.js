@@ -17,6 +17,16 @@ function isMissingRelationError(error, relation) {
   );
 }
 
+export async function getTank(id) {
+  const { data, error } = await supabase
+    .from('tanks')
+    .select('*, fuel_type:fuel_types ( id, code, name, color )')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 export async function listTanks({ organizationId, stationId, active = true } = {}) {
   let q = supabase
     .from('tanks')
@@ -127,34 +137,62 @@ export async function getTankStatuses({ organizationId, stationId } = {}) {
   });
 }
 
-// Same as getTankStatuses but additionally computes physical balance per tank
-// using supplies − sales + calibrations + adjustments. Heavier query — use on
-// the dedicated tanks/balances page, not on every dashboard render.
+// Same as getTankStatuses but additionally computes physical balance per tank.
+// Использует один серверный RPC fingas_tank_balances (миграция 0027) вместо
+// 5× supabase-запросов на каждый бак. Если RPC ещё не применён — падает в старую
+// логику с computePhysicalBalance.
 export async function getTankStatusesWithBalance({ organizationId, stationId } = {}) {
   const base = await getTankStatuses({ organizationId, stationId });
-  const enriched = await Promise.all(
-    base.map(async (t) => {
-      const { liters, breakdown } = await computePhysicalBalance(t).catch(
+  if (base.length === 0) return [];
+
+  // Один RPC на все баки.
+  const balanceMap = new Map(); // tank_id -> {liters, breakdown}
+  try {
+    const { data, error } = await supabase.rpc('fingas_tank_balances', {
+      p_organization_id: organizationId ?? null,
+      p_station_id: stationId ?? null,
+    });
+    if (error) throw error;
+    for (const row of data ?? []) {
+      balanceMap.set(row.tank_id, {
+        liters: Number(row.liters ?? 0),
+        breakdown: {
+          supplies:     Number(row.supplies ?? 0),
+          sales:        Number(row.sales ?? 0),
+          calibrations: Number(row.calibrations ?? 0),
+          adjustments:  Number(row.adjustments ?? 0),
+        },
+      });
+    }
+  } catch {
+    // Фолбэк на старую поштучную логику (когда миграция 0027 ещё не применена).
+    const fallback = await Promise.all(
+      base.map((t) => computePhysicalBalance(t).catch(
         () => ({ liters: 0, breakdown: { supplies: 0, sales: 0, calibrations: 0, adjustments: 0 } }),
-      );
-      const cap = Number(t.capacity_liters ?? 0);
-      const min = Number(t.min_liters ?? 0);
-      const crit = Number(t.critical_liters ?? 0);
-      const liveLiters = Math.max(0, liters);
-      const status =
-        liters > 0 && liters <= crit ? 'critical' :
-        liters > 0 && liters <= min  ? 'low'      :
-                                       'ok';
-      return {
-        ...t,
-        currentLiters: liveLiters,
-        pct: cap > 0 ? Math.min(100, (liveLiters / cap) * 100) : 0,
-        status,
-        breakdown,
-      };
-    }),
-  );
-  return enriched;
+      )),
+    );
+    base.forEach((t, i) => balanceMap.set(t.id, fallback[i]));
+  }
+
+  return base.map((t) => {
+    const bal = balanceMap.get(t.id) ?? { liters: 0, breakdown: { supplies: 0, sales: 0, calibrations: 0, adjustments: 0 } };
+    const liters = bal.liters;
+    const cap = Number(t.capacity_liters ?? 0);
+    const min = Number(t.min_liters ?? 0);
+    const crit = Number(t.critical_liters ?? 0);
+    const liveLiters = Math.max(0, liters);
+    const status =
+      liters > 0 && liters <= crit ? 'critical' :
+      liters > 0 && liters <= min  ? 'low'      :
+                                     'ok';
+    return {
+      ...t,
+      currentLiters: liveLiters,
+      pct: cap > 0 ? Math.min(100, (liveLiters / cap) * 100) : 0,
+      status,
+      breakdown: bal.breakdown,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +211,29 @@ export async function getTankStatusesWithBalance({ organizationId, stationId } =
 // we resolve it from the station record.
 export async function computePhysicalBalance(tank) {
   if (!tank?.id) return { liters: 0, breakdown: { supplies: 0, sales: 0, calibrations: 0, adjustments: 0 } };
+
+  // Быстрый путь — единственный серверный RPC. Если миграция 0027 не накатана —
+  // падаем в старую поштучную логику ниже.
+  try {
+    const { data, error } = await supabase.rpc('fingas_tank_balances', {
+      p_organization_id: tank.organization_id ?? null,
+      p_station_id: tank.station_id ?? null,
+    });
+    if (!error && Array.isArray(data)) {
+      const row = data.find((r) => r.tank_id === tank.id);
+      if (row) {
+        return {
+          liters: Number(row.liters ?? 0),
+          breakdown: {
+            supplies:     Number(row.supplies ?? 0),
+            sales:        Number(row.sales ?? 0),
+            calibrations: Number(row.calibrations ?? 0),
+            adjustments:  Number(row.adjustments ?? 0),
+          },
+        };
+      }
+    }
+  } catch {/* fall through */}
 
   const stationId = tank.station_id;
   const fuelCode  = tank.fuel_code ?? tank.fuel_type?.code ?? null;
@@ -238,9 +299,13 @@ export async function computePhysicalBalance(tank) {
 
 // Adjustments CRUD
 export async function listAdjustments({ tankId, organizationId, stationId, from, to } = {}) {
+  // Раньше тут был embed profiles!tank_adjustments_created_by_fkey, но FK
+  // created_by ссылается на auth.users, а не на public.profiles — PostgREST
+  // выдавал ошибку и весь список молча превращался в []. Убираем join,
+  // имя оператора (если оно реально нужно) добывается отдельным запросом.
   let q = supabase
     .from('tank_adjustments')
-    .select('*, created_by_profile:profiles!tank_adjustments_created_by_fkey ( full_name, email )')
+    .select('*')
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(200);
@@ -265,8 +330,91 @@ export async function createAdjustment(row) {
 }
 
 export async function deleteAdjustment(id) {
-  const { error } = await supabase.from('tank_adjustments').delete().eq('id', id);
+  const { data, error } = await supabase
+    .from('tank_adjustments')
+    .delete()
+    .eq('id', id)
+    .select('id');
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Удаление заблокировано (нет прав fuel_balances.can_delete или строка уже отсутствует).');
+  }
+}
+
+export async function updateAdjustment(id, patch) {
+  const { data, error } = await supabase
+    .from('tank_adjustments')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ---- Tank calibration grid (Градуировочная таблица) ----
+
+export async function listTankCalibrationGrid({ tankId }) {
+  if (!tankId) return [];
+  const { data, error } = await supabase
+    .from('tank_calibration_grid')
+    .select('*')
+    .eq('tank_id', tankId)
+    .order('height_cm', { ascending: true });
+  if (error && isMissingRelationError(error, 'tank_calibration_grid')) return [];
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function upsertTankCalibrationPoint(row) {
+  const { data, error } = await supabase
+    .from('tank_calibration_grid')
+    .upsert(row, { onConflict: 'tank_id,height_cm' })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteTankCalibrationPoint(id) {
+  const { error } = await supabase.from('tank_calibration_grid').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// Bulk upsert (массовый импорт). rows = [{height_cm, liters}, ...]
+export async function bulkUpsertTankCalibrationGrid({ organizationId, stationId, tankId, rows, replace = false }) {
+  if (!tankId || !Array.isArray(rows) || rows.length === 0) return { inserted: 0 };
+  if (replace) {
+    const { error: delErr } = await supabase
+      .from('tank_calibration_grid')
+      .delete()
+      .eq('tank_id', tankId);
+    if (delErr) throw delErr;
+  }
+  const payload = rows.map((r) => ({
+    organization_id: organizationId,
+    station_id: stationId,
+    tank_id: tankId,
+    height_cm: Number(r.height_cm),
+    liters: Number(r.liters),
+  }));
+  const { data, error } = await supabase
+    .from('tank_calibration_grid')
+    .upsert(payload, { onConflict: 'tank_id,height_cm' })
+    .select('id');
+  if (error) throw error;
+  return { inserted: data?.length ?? 0 };
+}
+
+// Linear interpolation cm → liters via stored grid. Returns null if out of range.
+export async function tankLitersAtCm({ tankId, heightCm }) {
+  if (!tankId || heightCm == null) return null;
+  const { data, error } = await supabase.rpc('fingas_tank_liters_at_cm', {
+    p_tank_id: tankId,
+    p_height_cm: heightCm,
+  });
+  if (error) throw error;
+  return data == null ? null : Number(data);
 }
 
 // Seed defaults: insert standard fuel types for an org if empty.

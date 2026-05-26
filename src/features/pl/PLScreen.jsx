@@ -203,7 +203,7 @@ export default function PLScreen() {
   return (
     <div className="space-y-4 pb-2">
       <ScreenHeader
-        title="Прибыли и убытки"
+        title="P&L"
         subtitle="Отчёт о прибылях и убытках"
         right={canExport(MODULES.PL) ? (
           <Button size="sm" variant="secondary" onClick={exportPL} className="h-9 w-9 p-0 flex items-center justify-center rounded-xl">

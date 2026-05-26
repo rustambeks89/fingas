@@ -321,7 +321,7 @@ export default function CashflowScreen() {
   return (
     <div className="space-y-4 pb-4">
       <ScreenHeader
-        title="Финансы"
+        title="Кэшфлоу"
         subtitle="Аналитика денежных потоков"
         right={canExport(MODULES.CASHFLOW) && visibleRows.length > 0 ? (
           <Button

@@ -214,7 +214,7 @@ export default function EmployeePermissionsScreen() {
         </div>
       </Card>
 
-      <div className="sticky bottom-24 mt-6">
+      <div className="mt-6">
         <Button size="block" loading={saving} onClick={saveAll}>
           <Save className="w-5 h-5" /> Сохранить права
         </Button>

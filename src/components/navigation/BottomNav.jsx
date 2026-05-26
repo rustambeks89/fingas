@@ -10,7 +10,7 @@ import {
   Menu,
   Plus,
   TrendingUp,
-  Wallet,
+  MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useUnreadMessages } from '@/hooks/useUnreadMessages';
@@ -90,37 +90,11 @@ export function BottomNav() {
                 </div>
               </li>
 
-              {/* 4. Финансы */}
-              <li><TabItem to="/cashflow" label="Финансы" icon={Wallet} /></li>
+              {/* 4. Сообщения */}
+              <li><TabItem to="/more/chat" label="Чат" icon={MessageSquare} badge={unreadCount > 0} /></li>
 
               {/* 5. Меню */}
-              <li>
-                <NavLink
-                  to="/more"
-                  className={({ isActive }) =>
-                    cn(
-                      'relative flex flex-col items-center gap-0.5 py-1.5 rounded-xl text-[9px] uppercase tracking-wider font-bold transition-all duration-200',
-                      isActive ? 'text-brand-500' : 'text-ink-muted hover:text-ink',
-                    )
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      {isActive && <ActivePill />}
-                      <div className="relative">
-                        <Menu className={cn('relative w-4.5 h-4.5 transition-colors', isActive ? 'text-brand-500' : 'text-ink-muted')} />
-                        {unreadCount > 0 && (
-                          <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-500 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-brand-500" />
-                          </span>
-                        )}
-                      </div>
-                      <span className="relative leading-none">Меню</span>
-                    </>
-                  )}
-                </NavLink>
-              </li>
+              <li><TabItem to="/more" label="Меню" icon={Menu} exact /></li>
             </ul>
           </div>
         </div>
@@ -141,7 +115,7 @@ function ActivePill() {
   );
 }
 
-function TabItem({ to, label, icon: Icon, exact }) {
+function TabItem({ to, label, icon: Icon, exact, badge }) {
   return (
     <NavLink
       to={to}
@@ -156,7 +130,15 @@ function TabItem({ to, label, icon: Icon, exact }) {
       {({ isActive }) => (
         <>
           {isActive && <ActivePill />}
-          <Icon className={cn('relative w-4.5 h-4.5 transition-colors', isActive ? 'text-brand-500' : 'text-ink-muted')} />
+          <div className="relative">
+            <Icon className={cn('relative w-4.5 h-4.5 transition-colors', isActive ? 'text-brand-500' : 'text-ink-muted')} />
+            {badge && (
+              <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-500 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-brand-500" />
+              </span>
+            )}
+          </div>
           <span className="relative leading-none">{label}</span>
         </>
       )}

@@ -30,7 +30,12 @@ const EMPTY_FORM = {
   phone: '',
   email: '',
   inn: '',
+  okpo: '',
   address: '',
+  legal_address: '',
+  director_name: '',
+  vat_payer: false,
+  vat_number: '',
   balance: '0',
   note: '',
 };
@@ -116,7 +121,12 @@ export default function SuppliersScreen() {
       phone: supplier.phone ?? '',
       email: supplier.email ?? '',
       inn: supplier.inn ?? '',
+      okpo: supplier.okpo ?? '',
       address: supplier.address ?? '',
+      legal_address: supplier.legal_address ?? '',
+      director_name: supplier.director_name ?? '',
+      vat_payer: !!supplier.vat_payer,
+      vat_number: supplier.vat_number ?? '',
       balance: String(supplier.balance ?? 0),
       note: supplier.note ?? '',
     });
@@ -149,7 +159,12 @@ export default function SuppliersScreen() {
         phone: cleanText(form.phone),
         email: cleanText(form.email),
         inn: cleanText(form.inn),
+        okpo: cleanText(form.okpo),
         address: cleanText(form.address),
+        legal_address: cleanText(form.legal_address),
+        director_name: cleanText(form.director_name),
+        vat_payer: !!form.vat_payer,
+        vat_number: form.vat_payer ? cleanText(form.vat_number) : null,
         balance: toNumber(form.balance),
         note: cleanText(form.note),
         active: true,
@@ -266,8 +281,62 @@ export default function SuppliersScreen() {
           label="Название"
           value={form.name}
           onChange={(e) => patchForm({ name: e.target.value })}
-          placeholder="ОсОО Поставщик"
+          placeholder="ОсОО «НК Этма»"
+          required
         />
+
+        <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft font-bold pt-1">Реквизиты</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Input
+            label="ИНН"
+            value={form.inn}
+            onChange={(e) => patchForm({ inn: e.target.value })}
+            placeholder="14 цифр"
+          />
+          <Input
+            label="ОКПО"
+            value={form.okpo}
+            onChange={(e) => patchForm({ okpo: e.target.value })}
+            placeholder="8 цифр"
+          />
+        </div>
+        <Input
+          label="Руководитель"
+          value={form.director_name}
+          onChange={(e) => patchForm({ director_name: e.target.value })}
+          placeholder="ФИО, должность"
+        />
+        <Input
+          label="Юридический адрес"
+          value={form.legal_address}
+          onChange={(e) => patchForm({ legal_address: e.target.value })}
+          placeholder="Бишкек, ул. ..."
+        />
+        <Input
+          label="Фактический адрес"
+          value={form.address}
+          onChange={(e) => patchForm({ address: e.target.value })}
+          hint="Если совпадает с юридическим — можно не заполнять"
+        />
+
+        <label className="flex items-center gap-2 text-sm text-ink pt-1">
+          <input
+            type="checkbox"
+            checked={form.vat_payer}
+            onChange={(e) => patchForm({ vat_payer: e.target.checked })}
+            className="w-4 h-4 rounded border-line/50"
+          />
+          Плательщик НДС
+        </label>
+        {form.vat_payer && (
+          <Input
+            label="Регистрационный № НДС"
+            value={form.vat_number}
+            onChange={(e) => patchForm({ vat_number: e.target.value })}
+          />
+        )}
+
+        <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft font-bold pt-2">Контакты</div>
         <div className="grid grid-cols-2 gap-3">
           <Input
             label="Телефон"
@@ -276,22 +345,14 @@ export default function SuppliersScreen() {
             placeholder="+996"
           />
           <Input
-            label="ИНН"
-            value={form.inn}
-            onChange={(e) => patchForm({ inn: e.target.value })}
+            label="Email"
+            type="email"
+            value={form.email}
+            onChange={(e) => patchForm({ email: e.target.value })}
           />
         </div>
-        <Input
-          label="Email"
-          type="email"
-          value={form.email}
-          onChange={(e) => patchForm({ email: e.target.value })}
-        />
-        <Input
-          label="Адрес"
-          value={form.address}
-          onChange={(e) => patchForm({ address: e.target.value })}
-        />
+
+        <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft font-bold pt-2">Сальдо</div>
         <Input
           label="Начальное сальдо"
           type="number"
@@ -299,7 +360,7 @@ export default function SuppliersScreen() {
           step="0.01"
           value={form.balance}
           onChange={(e) => patchForm({ balance: e.target.value })}
-          hint="Положительное значение означает, что мы должны поставщику."
+          hint="Положительное значение — мы должны поставщику. Банковские счета добавляются в карточке поставщика."
         />
         <Input
           label="Комментарий"

@@ -44,16 +44,73 @@ export async function listSales({ stationId, from, to, shiftKey, limit = 200, co
   return data ?? [];
 }
 
-// Aggregate revenue + liters for a shift window.
+// Aggregate revenue + liters for a shift window. Из суммы продаж
+// вычитаются поверочные проливы (calibrations) за тот же период по тому
+// же баку — топливо возвращается в резервуар и не считается реальной
+// выручкой. Цена литра берётся как средняя по azs_selling за период.
 export async function aggregateForShift({ stationId, from, to } = {}) {
   const rows = await listSales({ stationId, from, to, limit: 50000 });
   let revenue = 0;
   let liters = 0;
+  // Средняя цена за литр по каждой марке за период — нужна чтобы
+  // снять выручку пропорционально поверке.
+  const perFuel = new Map(); // fuel -> { liters, revenue }
   for (const r of rows) {
-    revenue += Number(r.ShopCost ?? 0);
-    liters += Number(r.Volume ?? 0);
+    const cost = Number(r.ShopCost ?? 0);
+    const vol  = Number(r.Volume   ?? 0);
+    revenue += cost;
+    liters  += vol;
+    const fuel = r.FuelName ?? '';
+    if (fuel) {
+      const g = perFuel.get(fuel) ?? { liters: 0, revenue: 0 };
+      g.liters  += vol;
+      g.revenue += cost;
+      perFuel.set(fuel, g);
+    }
   }
-  return { revenue, liters, count: rows.length, rows };
+
+  let calibrationLiters = 0;
+  let calibrationRevenue = 0;
+  if (stationId && from && to) {
+    try {
+      const fromDate = String(from).slice(0, 10);
+      const toDate   = String(to).slice(0, 10);
+      const { data: calRows } = await supabase
+        .from('calibrations')
+        .select('fuel, volume')
+        .eq('station_id', stationId)
+        .gte('date', fromDate)
+        .lte('date', toDate);
+      for (const c of calRows ?? []) {
+        const fuel = c.fuel ?? '';
+        const v    = Number(c.volume ?? 0);
+        if (!fuel || !(v > 0)) continue;
+        const g = perFuel.get(fuel);
+        if (!g || !(g.liters > 0)) continue;
+        const deduct = Math.min(g.liters, v);
+        const price  = g.revenue / g.liters;
+        calibrationLiters  += deduct;
+        calibrationRevenue += deduct * price;
+        // Уменьшаем «оставшийся» бюджет в perFuel чтобы повторные строки
+        // не списывали один и тот же объём дважды.
+        g.liters  -= deduct;
+        g.revenue -= deduct * price;
+      }
+    } catch (e) {
+      console.warn('[salesService] aggregateForShift calibration deduction failed:', e?.message ?? e);
+    }
+  }
+
+  return {
+    revenue: revenue - calibrationRevenue,
+    liters:  liters  - calibrationLiters,
+    count:   rows.length,
+    rows,
+    calibrationLiters,
+    calibrationRevenue,
+    grossRevenue: revenue,
+    grossLiters:  liters,
+  };
 }
 
 // FIFO cost-of-goods-sold for a period. Walks supplies and sales together.

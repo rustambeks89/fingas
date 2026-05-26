@@ -2,25 +2,28 @@
 // Project: Fingas
 // Purpose: In-place TRK calibration form.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { Input, Select } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { createCalibration } from '@/services/fuelService';
+import { listStations } from '@/services/stationService';
 import { useAuth } from '@/hooks/useAuth';
 
 const FUEL_TYPES = ['АИ-92', 'АИ-95', 'АИ-98', 'ДТ', 'Газ'];
 
-export function CalibrationQuickForm({ onDone, onCancel }) {
+export function CalibrationQuickForm({ onDone, onCancel, defaultFuelType = null }) {
   const { user } = useAuth();
   const orgId = user?.profile?.organization_id;
-  const stationId = user?.profile?.station_id;
+  const profileStationId = user?.profile?.station_id ?? null;
   const now = new Date();
 
+  const [stations, setStations] = useState([]);
+  const [stationId, setStationId] = useState(profileStationId ?? '');
   const [form, setForm] = useState({
     date: now.toISOString().slice(0, 10),
     time: now.toTimeString().slice(0, 5),
-    fuel: 'АИ-92',
+    fuel: defaultFuelType ?? 'АИ-92',
     volume: '',
     trk_number: '',
     operator: '',
@@ -29,17 +32,32 @@ export function CalibrationQuickForm({ onDone, onCancel }) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    listStations(orgId).then((rows) => {
+      if (cancelled) return;
+      setStations(rows);
+      if (!stationId && rows.length > 0) {
+        setStationId(rows[0].id);
+      }
+    }).catch(() => { if (!cancelled) setStations([]); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
+
   async function submit(e) {
     e?.preventDefault?.();
     setErr('');
     const volume = Number(form.volume);
     if (!volume || volume <= 0) { setErr('Введите объём поверки'); return; }
-    if (!stationId) { setErr('У вас не назначена АЗС'); return; }
+    const chosenStationId = stationId || profileStationId;
+    if (!chosenStationId) { setErr('Выберите АЗС'); return; }
     setSaving(true);
     try {
       await createCalibration({
         organization_id: orgId,
-        station_id: stationId,
+        station_id: chosenStationId,
         date: form.date,
         time: form.time,
         fuel: form.fuel,
@@ -57,16 +75,27 @@ export function CalibrationQuickForm({ onDone, onCancel }) {
     }
   }
 
+  const showStationPicker = stations.length > 1 || (!profileStationId && stations.length > 0);
+
   return (
     <form onSubmit={submit} className="space-y-4">
+      {showStationPicker && (
+        <Select label="АЗС" value={stationId} onChange={(e) => setStationId(e.target.value)}>
+          <option value="">— Выберите АЗС —</option>
+          {stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </Select>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <Input label="Дата" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
         <Input label="Время" type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
       </div>
 
-      <Select label="Топливо" value={form.fuel} onChange={(e) => setForm({ ...form, fuel: e.target.value })}>
-        {FUEL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-      </Select>
+      {!defaultFuelType && (
+        <Select label="Топливо" value={form.fuel} onChange={(e) => setForm({ ...form, fuel: e.target.value })}>
+          {FUEL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </Select>
+      )}
 
       <Input label="Объём поверки, л" type="number" step="0.001" min="0" value={form.volume} onChange={(e) => setForm({ ...form, volume: e.target.value })} required />
       <Input label="№ ТРК" value={form.trk_number} onChange={(e) => setForm({ ...form, trk_number: e.target.value })} />

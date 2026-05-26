@@ -25,6 +25,7 @@ import {
   MapPin,
   MessageSquare,
   Receipt,
+  Ruler,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -52,52 +53,14 @@ function buildSections(user, owner) {
 
   return [
     {
-      title: 'Учет АЗС и операции',
-      items: [
-        { label: 'Смены',               icon: ClipboardList, to: '/shifts',            show: can(MODULES.SHIFTS) },
-        { label: 'Поступления топлива', icon: Fuel,          to: '/fuel-supply',       show: can(MODULES.FUEL_SUPPLY) },
-        { label: 'Замеры резервуаров',  icon: Gauge,         to: '/tank-measurements', show: can(MODULES.TANK_MEASUREMENTS) },
-        { label: 'Поверки ТРК',         icon: Wrench,        to: '/calibrations',      show: can(MODULES.CALIBRATIONS) },
-        { label: 'Инкассация',          icon: Wallet,        to: '/collections',       show: can(MODULES.COLLECTIONS) },
-        { label: 'Резервуары',          icon: Droplets,      to: '/tanks',             show: can(MODULES.FUEL_BALANCES) },
-        { label: 'Остатки топлива',     icon: Droplets,      to: '/fuel-balances',     show: can(MODULES.FUEL_BALANCES) },
-      ],
-    },
-    {
-      title: 'Финансовый блок',
-      items: [
-        { label: 'Движение денег',     icon: Wallet,    to: '/cashflow',        show: can(MODULES.CASHFLOW) },
-        { label: 'Контрагенты',   icon: Users,     to: '/counterparties',  show: can(MODULES.SUPPLIERS) },
-        { label: 'Налоги',        icon: Receipt,   to: '/taxes',           show: can(MODULES.TAXES) },
-        { label: 'Зарплата',      icon: Banknote,  to: '/payroll',         show: can(MODULES.PAYROLL) },
-        { label: 'Прибыли и убытки',     icon: TrendingUp, to: '/pl',             show: can(MODULES.PL) },
-      ],
-    },
-    {
-      title: 'Администрирование',
-      items: [
-        { label: 'Команда',         icon: Users,       to: '/employees',                       show: can(MODULES.EMPLOYEES) },
-        { label: 'Доступы',         icon: ShieldCheck, to: '/employees',                       show: can(MODULES.EMPLOYEES) },
-        { label: 'Станции',         icon: MapPin,      to: '/settings',                        show: can(MODULES.SETTINGS) },
-        { label: 'Организация',     icon: Building2,   to: '/settings',                        show: can(MODULES.SETTINGS) },
-      ],
-    },
-    {
       title: 'Справочники',
       items: [
         { label: 'Виды топлива',    icon: Droplets, to: '/directories/fuel-types',           show: can(MODULES.SETTINGS) },
         { label: 'Финансовые статьи',  icon: Wallet,   to: '/directories/cashflow-categories',  show: can(MODULES.SETTINGS) },
         { label: 'Кошельки',        icon: Wallet,   to: '/directories/wallets',              show: can(MODULES.SETTINGS) },
         { label: 'Резервуары',      icon: Gauge,    to: '/tanks',                            show: can(MODULES.FUEL_BALANCES) },
+        { label: 'Градуировочная таблица', icon: Ruler, to: '/directories/tank-calibration-grid', show: can(MODULES.SETTINGS) },
         { label: 'Контрагенты',     icon: Users,    to: '/counterparties',                   show: can(MODULES.SUPPLIERS) },
-      ],
-    },
-    {
-      title: 'Коммуникации',
-      items: [
-        { label: 'Сообщения',    icon: MessageSquare, to: '/more/chat' },
-        { label: 'Уведомления',  icon: Bell,          to: '/notifications', show: can(MODULES.NOTIFICATIONS) },
-        { label: 'Документы',   icon: FileText,   to: '/documents',  show: can(MODULES.DOCUMENTS) },
       ],
     },
     {

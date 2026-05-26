@@ -122,7 +122,6 @@ export default function CollectionsScreen() {
 
   function validateForm() {
     if (!organizationId) return 'У пользователя не выбрана организация.';
-    if (!stationId) return 'У пользователя не выбрана АЗС.';
     if (!isNonEmpty(form.date)) return 'Укажите дату инкассации.';
     if (!isPositiveNumber(form.amount)) return 'Сумма должна быть больше нуля.';
     return '';
@@ -140,7 +139,7 @@ export default function CollectionsScreen() {
     try {
       await createCashflow({
         organization_id: organizationId,
-        station_id: stationId,
+        station_id: stationId || null,
         date: form.date,
         operation_type: CASHFLOW_OPERATION.COLLECTION,
         payment_type: 'cash',

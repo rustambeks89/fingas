@@ -59,9 +59,15 @@ export default function RegisterScreen() {
       setStations([]);
       return;
     }
-    listRegistrationStations({ organizationId: form.organization_id })
+    // listRegistrationStations принимает строку UUID, не объект — раньше
+    // тут передавали { organizationId } и RPC падала на типе, а .catch
+    // прятал ошибку → список АЗС всегда был пустой.
+    listRegistrationStations(form.organization_id)
       .then(setStations)
-      .catch(() => {});
+      .catch((e) => {
+        console.warn('[RegisterScreen] listRegistrationStations failed:', e?.message ?? e);
+        setStations([]);
+      });
   }, [form.organization_id]);
 
   async function handleSubmit(e) {

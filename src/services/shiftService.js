@@ -336,7 +336,11 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
       lastAt:  h?.lastAt  ?? null,
       balanceAt: g.balanceAt ?? null,
       syncedAt: g.syncedAt ?? null,
-      hasSellingTime: Boolean(h?.firstAt || h?.lastAt),
+      // Флаг исторически назывался hasSellingTime, но реально нам нужно знать,
+      // есть ли вообще транзакции по этой смене в azs_selling — это решает,
+      // показывать счётчик чеков или прочерк. Привязка к azs_shift была ошибкой
+      // (после рефакторинга дат архив без azs_shift скрывал и чеки).
+      hasSellingTime: (c?.count ?? 0) > 0,
       liters: g.liters,
       revenue: g.revenue,
       count: c?.count ?? 0,
@@ -359,6 +363,74 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
       if (from && end   && end   < from) return false;
       return true;
     });
+  }
+
+  // 6.5. Вычитаем поверки из продаж. Поверочный пролив проходит через
+  // дисперсер и попадает в azs_selling/azs_balance как обычная продажа,
+  // но по факту топливо возвращается в бак. Поэтому литры и выручку
+  // соответствующих фьюэлов мы уменьшаем на объём поверки за тот же день.
+  // Цена литра при вычитании берётся из самой смены (revenue/liters по
+  // марке топлива), чтобы выручка падала пропорционально.
+  if (stationId) {
+    try {
+      const dateBounds = combined.reduce((acc, s) => {
+        const a = s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt;
+        if (!a) return acc;
+        const d = new Date(a);
+        if (Number.isNaN(d.getTime())) return acc;
+        if (!acc.min || d < acc.min) acc.min = d;
+        if (!acc.max || d > acc.max) acc.max = d;
+        return acc;
+      }, { min: null, max: null });
+      if (dateBounds.min && dateBounds.max) {
+        const calFrom = new Date(dateBounds.min); calFrom.setHours(0, 0, 0, 0);
+        const calTo   = new Date(dateBounds.max); calTo.setHours(23, 59, 59, 999);
+        const { data: calRows } = await supabase
+          .from('calibrations')
+          .select('date, fuel, volume')
+          .eq('station_id', stationId)
+          .gte('date', calFrom.toISOString().slice(0, 10))
+          .lte('date', calTo.toISOString().slice(0, 10));
+        if (calRows && calRows.length > 0) {
+          // Карта: 'YYYY-MM-DD' -> { fuel -> totalLiters }
+          const byDayFuel = new Map();
+          for (const c of calRows) {
+            const day = String(c.date ?? '').slice(0, 10);
+            const fuel = c.fuel ?? '';
+            const v = Number(c.volume ?? 0);
+            if (!day || !fuel || !(v > 0)) continue;
+            if (!byDayFuel.has(day)) byDayFuel.set(day, new Map());
+            const m = byDayFuel.get(day);
+            m.set(fuel, (m.get(fuel) ?? 0) + v);
+          }
+          for (const s of combined) {
+            const a = s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt;
+            if (!a) continue;
+            const day = (new Date(a)).toISOString().slice(0, 10);
+            const m = byDayFuel.get(day);
+            if (!m) continue;
+            for (const [fuel, calLitersTotal] of m.entries()) {
+              const fuelGroup = s.fuels?.[fuel];
+              if (!fuelGroup || !(fuelGroup.liters > 0) || !(calLitersTotal > 0)) continue;
+              const deduct = Math.min(fuelGroup.liters, calLitersTotal);
+              const priceForFuel = fuelGroup.liters > 0 ? fuelGroup.revenue / fuelGroup.liters : 0;
+              const deductRevenue = deduct * priceForFuel;
+              fuelGroup.liters  -= deduct;
+              fuelGroup.revenue -= deductRevenue;
+              s.liters  -= deduct;
+              s.revenue -= deductRevenue;
+              // Остаток поверочного объёма на день — раздаётся между сменами одного дня
+              m.set(fuel, calLitersTotal - deduct);
+              // Помечаем сколько вычли — пригодится UI чтобы показать «- поверка X л»
+              s.calibrationDeducted = (s.calibrationDeducted ?? 0) + deduct;
+              s.calibrationDeductedRevenue = (s.calibrationDeductedRevenue ?? 0) + deductRevenue;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[shiftService] calibration deduction failed:', e?.message ?? e);
+    }
   }
 
   // 6. БЕЗ объединения. Раньше склеивали смены того же оператора в коротком

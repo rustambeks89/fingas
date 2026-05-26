@@ -83,13 +83,13 @@ export default function SystemScreen() {
           <div className="relative">
             <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft font-bold">Состояние</div>
             <div className="mt-1 text-xl font-bold text-ink">
-              {state.selling?.exists && state.balance?.exists && state.profiles?.exists ? 'OK' : 'Проверка'}
+              {state.selling?.exists && state.balance?.exists && state.profiles?.exists ? 'В норме' : 'Проверка'}
             </div>
             <div className="mt-0.5 text-xs text-ink-muted">Быстрая диагностика таблиц и подключения Supabase</div>
             <div className="grid grid-cols-3 gap-2 mt-2.5">
-              <MetricCard label="Selling" ok={state.selling?.exists} />
-              <MetricCard label="Balance" ok={state.balance?.exists} />
-              <MetricCard label="Profiles" ok={state.profiles?.exists} />
+              <MetricCard label="Продажи" ok={state.selling?.exists} />
+              <MetricCard label="Балансы" ok={state.balance?.exists} />
+              <MetricCard label="Профили" ok={state.profiles?.exists} />
             </div>
           </div>
         </motion.div>
@@ -118,13 +118,13 @@ export default function SystemScreen() {
       <Card className="!p-1 rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl">
         <ul className="divide-y divide-line/50">
           <Row
-            label="azs_selling"
+            label="Продажи (azs_selling)"
             hint="Продажи из АСУ АЗС"
             data={state.selling}
             loading={state.loading}
           />
           <Row
-            label="azs_balance"
+            label="Балансы (azs_balance)"
             hint="Остатки по резервуарам"
             data={state.balance}
             loading={state.loading}
@@ -139,7 +139,7 @@ export default function SystemScreen() {
       <Card className="!p-1 rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl">
         <ul className="divide-y divide-line/50">
           <Row
-            label="profiles"
+            label="Профили (profiles)"
             hint="Пользователи + роли"
             data={state.profiles}
             loading={state.loading}

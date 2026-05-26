@@ -27,8 +27,7 @@ import { formatDateTime, formatLiters, formatMoney, formatTime, parsePosDate } f
 import { downloadCSV, todayStamp } from '@/lib/exporters';
 
 const PERIODS = [
-  { id: 'day', label: 'День' },
-  { id: 'week', label: 'Неделя' },
+  { id: 'week', label: '7 дней' },
   { id: 'month', label: 'Месяц' },
   { id: 'year', label: 'Год' },
 ];
@@ -135,7 +134,7 @@ export default function SalesScreen() {
   const { canExport } = usePermissions();
   const stationId = user?.profile?.station_id;
 
-  const [period, setPeriod] = useState('day');
+  const [period, setPeriod] = useState('week');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [expanded, setExpanded] = useState(false);
@@ -221,32 +220,6 @@ export default function SalesScreen() {
         </div>
       )}
 
-      {/* Segmented capsule switcher control with smooth frame transitions */}
-      <div className="relative grid grid-cols-4 p-1 rounded-2xl bg-bg-card/75 backdrop-blur-xl border border-line/30 shadow-inner gap-1">
-        {PERIODS.map((item) => {
-          const active = period === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setPeriod(item.id)}
-              className="relative h-9 rounded-xl text-xs font-black transition-colors duration-200 z-10 flex items-center justify-center cursor-pointer"
-            >
-              {active && (
-                <motion.div
-                  layoutId="activePeriodPill"
-                  className="absolute inset-0 bg-gradient-to-r from-brand-400 to-brand-500 rounded-xl shadow-glow -z-10"
-                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                />
-              )}
-              <span className={active ? 'text-white' : 'text-ink-soft hover:text-ink-muted'}>
-                {item.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
       {loading ? (
         <SalesScreenSkeleton />
       ) : (
@@ -266,6 +239,37 @@ export default function SalesScreen() {
           )}
 
           <TopOperatorsCard leaders={leaders} />
+
+          {/* Period Selector - Now placed precisely above the Previous Shifts section */}
+          <div className="space-y-1.5 mt-2">
+            <span className="text-[9px] uppercase tracking-[0.25em] text-brand-400 font-extrabold px-1.5">
+              Период архива смен
+            </span>
+            <div className="relative grid grid-cols-3 p-1 rounded-2xl bg-bg-card/75 backdrop-blur-xl border border-line/30 shadow-inner gap-1">
+              {PERIODS.map((item) => {
+                const active = period === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setPeriod(item.id)}
+                    className="relative h-9 rounded-xl text-xs font-black transition-colors duration-200 z-10 flex items-center justify-center cursor-pointer"
+                  >
+                    {active && (
+                      <motion.div
+                        layoutId="activePeriodPill"
+                        className="absolute inset-0 bg-gradient-to-r from-brand-400 to-brand-500 rounded-xl shadow-glow -z-10"
+                        transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                      />
+                    )}
+                    <span className={active ? 'text-white' : 'text-ink-soft hover:text-ink-muted'}>
+                      {item.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Previous Shifts Collapsible Panel */}
           <Card className="!p-0 overflow-hidden shadow-card border border-line/30 relative bg-bg-card/75 backdrop-blur-2xl dark:shadow-card-premium">
@@ -358,6 +362,43 @@ function SalesScreenSkeleton() {
   );
 }
 
+function getFuelStyles(fuelName) {
+  const name = String(fuelName || '').toUpperCase();
+  if (name.includes('98') || name.includes('100')) {
+    return {
+      gradient: 'from-violet-600 to-fuchsia-400',
+      glow: 'shadow-[0_0_8px_rgba(168,85,247,0.5)]',
+      dot: '#C084FC',
+    };
+  }
+  if (name.includes('95')) {
+    return {
+      gradient: 'from-amber-500 to-yellow-300',
+      glow: 'shadow-[0_0_8px_rgba(245,158,11,0.5)]',
+      dot: '#FBBF24',
+    };
+  }
+  if (name.includes('92')) {
+    return {
+      gradient: 'from-emerald-500 to-teal-300',
+      glow: 'shadow-[0_0_8px_rgba(16,185,129,0.5)]',
+      dot: '#34D399',
+    };
+  }
+  if (name.includes('ДТ') || name.includes('DIESEL') || name.includes('ДИЗЕЛЬ')) {
+    return {
+      gradient: 'from-sky-600 to-cyan-400',
+      glow: 'shadow-[0_0_8px_rgba(14,165,233,0.5)]',
+      dot: '#38BDF8',
+    };
+  }
+  return {
+    gradient: 'from-brand-500 to-rose-400',
+    glow: 'shadow-[0_0_8px_rgba(244,63,94,0.5)]',
+    dot: '#FB7185',
+  };
+}
+
 function LiveSalesCard({ shift }) {
   const fuelEntries = Object.entries(shift?.fuels ?? {}).sort((a, b) => b[1].liters - a[1].liters);
   const totalLiters = Number(shift?.liters ?? 0) || 1;
@@ -411,11 +452,18 @@ function LiveSalesCard({ shift }) {
           <div className="pt-4 border-t border-line/30 dark:border-white/[0.06] space-y-3">
             {fuelEntries.slice(0, 4).map(([fuel, value]) => {
               const pct = (Number(value.liters ?? 0) / totalLiters) * 100;
+              const fstyle = getFuelStyles(fuel);
               return (
                 <div key={fuel} className="space-y-1">
                   <div className="flex items-center justify-between gap-3 text-[11px]">
                     <span className="text-ink font-bold truncate flex items-center gap-1.5 min-w-0">
-                      <Fuel className="w-3.5 h-3.5 text-brand-400 flex-shrink-0" />
+                      <span
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{
+                          background: fstyle.dot,
+                          boxShadow: `0 0 6px ${fstyle.dot}aa`
+                        }}
+                      />
                       {fuel}
                     </span>
                     <span className="text-ink-muted font-bold tabular-nums text-right">
@@ -424,7 +472,7 @@ function LiveSalesCard({ shift }) {
                   </div>
                   <div className="h-2 rounded-full bg-bg-elevated/80 dark:bg-black/40 overflow-hidden border border-line/30 dark:border-white/[0.03] p-[2px] relative">
                     <div
-                      className="h-full bg-gradient-to-r from-success to-emerald-400 rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+                      className={`h-full bg-gradient-to-r ${fstyle.gradient} rounded-full transition-all duration-500 ${fstyle.glow}`}
                       style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
                     />
                   </div>
@@ -563,8 +611,11 @@ function TopOperatorsCard({ leaders }) {
 
 function ArchivedShiftRow({ shift }) {
   const operator = shift?.operatorFinal ?? shift?.operatorOriginal ?? shift?.operator ?? '—';
-  const startedAt = shift?.balanceAt ?? shift?.firstAt ?? null;
-  const endedAt = shift?.lastAt ?? shift?.balanceAt ?? startedAt;
+  // Даты — приоритет azs_shift.DatetimeShiftBegin/End (firstAt/lastAt). balanceAt
+  // = synced_at из azs_balance, это момент репликации в Supabase, а не реальное
+  // время смены — оставляем как fallback на случай если строки в azs_shift нет.
+  const startedAt = shift?.firstAt ?? shift?.balanceAt ?? null;
+  const endedAt = shift?.lastAt ?? shift?.firstAt ?? shift?.balanceAt ?? startedAt;
   const showChecks = Boolean(shift?.hasSellingTime);
 
   return (
@@ -608,6 +659,15 @@ function ArchivedShiftRow({ shift }) {
         <MetricCell icon={Fuel} label="Литры" value={formatLiters(shift.liters)} />
         <MetricCell icon={Clock} label="Чеки" value={showChecks ? Number(shift.count ?? 0).toLocaleString('ru-RU') : '—'} />
       </div>
+      {(shift.calibrationDeducted ?? 0) > 0 && (
+        <div className="text-[10px] text-warning font-bold flex items-center gap-1.5 mt-1">
+          <span>— поверка</span>
+          <span>{formatLiters(shift.calibrationDeducted)}</span>
+          {(shift.calibrationDeductedRevenue ?? 0) > 0 && (
+            <span className="text-ink-soft">· {formatMoney(shift.calibrationDeductedRevenue)}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

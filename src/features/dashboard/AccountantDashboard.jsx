@@ -90,7 +90,7 @@ export default function AccountantDashboard() {
   return (
     <div className="pb-2 space-y-2.5">
       <ScreenHeader
-        title="Финансы"
+        title="Кэшфлоу"
         subtitle="За текущий месяц MTD"
         right={
           <Badge tone="warning" className="text-[10px]">
@@ -178,7 +178,7 @@ export default function AccountantDashboard() {
           <Card hoverable className="!p-3 text-center border-line/40 bg-bg-card">
             <TrendingUp className="w-4 h-4 mx-auto text-brand-400 mb-1" />
             <div className="text-xs font-semibold text-ink">Отчёт P&L</div>
-            <div className="text-[9px] text-ink-muted mt-0.5">Прибыли и убытки</div>
+            <div className="text-[9px] text-ink-muted mt-0.5">P&L</div>
           </Card>
         </Link>
         <Link to="/documents">

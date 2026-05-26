@@ -45,10 +45,12 @@ const ProfileScreen = lazy(() => import('@/features/profile/ProfileScreen'));
 const MoreScreen = lazy(() => import('@/features/more/MoreScreen'));
 const SystemScreen = lazy(() => import('@/features/system/SystemScreen'));
 const TanksScreen = lazy(() => import('@/features/tanks/TanksScreen'));
+const TankDetailScreen = lazy(() => import('@/features/tanks/TankDetailScreen'));
 const CounterpartiesReportScreen = lazy(() => import('@/features/counterparties/CounterpartiesReportScreen'));
 const FuelTypesScreen = lazy(() => import('@/features/directories/FuelTypesScreen'));
 const CashflowCategoriesScreen = lazy(() => import('@/features/directories/CashflowCategoriesScreen'));
 const WalletsScreen = lazy(() => import('@/features/directories/WalletsScreen'));
+const TankCalibrationGridScreen = lazy(() => import('@/features/directories/TankCalibrationGridScreen'));
 const ChatListScreen = lazy(() => import('@/features/chat/ChatListScreen'));
 const ChatThreadScreen = lazy(() => import('@/features/chat/ChatThreadScreen'));
 const NewChatScreen = lazy(() => import('@/features/chat/NewChatScreen'));
@@ -138,10 +140,12 @@ export function AppRouter() {
         <Route path="more" element={<MoreScreen />} />
         <Route path="system" element={<SystemScreen />} />
         <Route path="tanks" element={<ModuleRoute module={MODULES.FUEL_BALANCES}><TanksScreen /></ModuleRoute>} />
+        <Route path="tanks/:id" element={<ModuleRoute module={MODULES.FUEL_BALANCES}><TankDetailScreen /></ModuleRoute>} />
         <Route path="counterparties" element={<ModuleRoute module={MODULES.SUPPLIERS}><CounterpartiesReportScreen /></ModuleRoute>} />
         <Route path="directories/fuel-types" element={<ModuleRoute module={MODULES.SETTINGS}><FuelTypesScreen /></ModuleRoute>} />
         <Route path="directories/cashflow-categories" element={<ModuleRoute module={MODULES.SETTINGS}><CashflowCategoriesScreen /></ModuleRoute>} />
         <Route path="directories/wallets" element={<ModuleRoute module={MODULES.SETTINGS}><WalletsScreen /></ModuleRoute>} />
+        <Route path="directories/tank-calibration-grid" element={<ModuleRoute module={MODULES.SETTINGS}><TankCalibrationGridScreen /></ModuleRoute>} />
         <Route path="more/chat" element={<ModuleRoute module={MODULES.CHAT}><ChatListScreen /></ModuleRoute>} />
         <Route path="more/chat/:threadId" element={<ModuleRoute module={MODULES.CHAT}><ChatThreadScreen /></ModuleRoute>} />
         <Route path="more/chat/:threadId/settings" element={<ModuleRoute module={MODULES.CHAT}><ChatSettingsScreen /></ModuleRoute>} />

@@ -48,7 +48,7 @@ const FUEL_TYPES = [
 ];
 
 export default function CalibrationsScreen() {
-  const { organizationId, stationId, user } = useOrgContext();
+  const { organizationId, stationId: profileStationId, stations, user } = useOrgContext();
   const { canEdit, canDelete } = usePermissions();
   const [activeTab, setActiveTab] = useState('history'); // history | matching | manual
 
@@ -57,6 +57,15 @@ export default function CalibrationsScreen() {
   const [exclusions, setExclusions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
+
+  const [pickedStationId, setPickedStationId] = useState(profileStationId ?? '');
+  useEffect(() => {
+    if (!pickedStationId && stations.length > 0) {
+      setPickedStationId(profileStationId ?? stations[0].id);
+    }
+  }, [profileStationId, stations, pickedStationId]);
+  const stationId = pickedStationId || profileStationId;
+  const showStationPicker = stations.length > 1 || (!profileStationId && stations.length > 0);
 
   // Form Sheets
   const [selectedSale, setSelectedSale] = useState(null);
@@ -113,8 +122,12 @@ export default function CalibrationsScreen() {
 
   // Handle manual or matched submission
   async function handleCreateCalibration(isMatched = false) {
-    if (!stationId || !organizationId) {
-      setErr('Не выбран контекст АЗС.');
+    if (!organizationId) {
+      setErr('Не выбрана организация.');
+      return;
+    }
+    if (!stationId) {
+      setErr('Выберите АЗС.');
       return;
     }
 
@@ -261,6 +274,14 @@ export default function CalibrationsScreen() {
   return (
     <div>
       <ScreenHeader title="Поверки ТРК" subtitle="Учет калибровочных проливов и сверка" />
+
+      {showStationPicker && (
+        <div className="mb-3">
+          <Select label="АЗС" value={pickedStationId} onChange={(e) => setPickedStationId(e.target.value)}>
+            {stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </Select>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex bg-bg-soft border border-line p-1 rounded-2xl gap-1 mb-4">

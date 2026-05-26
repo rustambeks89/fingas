@@ -39,8 +39,15 @@ export async function updateFuelSupply(id, patch) {
 }
 
 export async function deleteFuelSupply(id) {
-  const { error } = await supabase.from('fuel_supply').delete().eq('id', id);
+  const { data, error } = await supabase
+    .from('fuel_supply')
+    .delete()
+    .eq('id', id)
+    .select('id');
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Удаление заблокировано (нет прав fuel_supply.can_delete или строка уже отсутствует).');
+  }
 }
 
 // ---- tank measurements ----
@@ -65,6 +72,29 @@ export async function createTankMeasurement(row) {
     .single();
   if (error) throw error;
   return data;
+}
+
+export async function updateTankMeasurement(id, patch) {
+  const { data, error } = await supabase
+    .from('tank_measurements')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteTankMeasurement(id) {
+  const { data, error } = await supabase
+    .from('tank_measurements')
+    .delete()
+    .eq('id', id)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Удаление заблокировано (нет прав tank_measurements.can_delete или строка уже отсутствует).');
+  }
 }
 
 // ---- calibrations ----
@@ -103,6 +133,13 @@ export async function updateCalibration(id, patch) {
 }
 
 export async function deleteCalibration(id) {
-  const { error } = await supabase.from('calibrations').delete().eq('id', id);
+  const { data, error } = await supabase
+    .from('calibrations')
+    .delete()
+    .eq('id', id)
+    .select('id');
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Удаление заблокировано (нет прав calibrations.can_delete или строка уже отсутствует).');
+  }
 }

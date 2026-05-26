@@ -5,7 +5,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Building2, ChevronRight, Layers3, MapPin, Monitor, Moon, Plus, Power, Sun } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Building2, ChevronRight, Layers3, MapPin, Monitor, Moon, Plus, Power, Sun, Users, ShieldCheck } from 'lucide-react';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -117,44 +118,6 @@ export default function SettingsScreen() {
         </motion.div>
       )}
 
-      {/* THEME */}
-      <Card hoverable className="p-5 mb-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-bg-elevated border border-line/50 flex items-center justify-center text-brand-500 flex-shrink-0">
-              {theme === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-            </div>
-            <div className="min-w-0">
-              <div className="font-semibold text-ink">Тема оформления</div>
-              <div className="text-xs text-ink-muted truncate">{themeLabel}</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 flex-wrap justify-end">
-            <button
-              type="button"
-              onClick={() => setTheme('light')}
-              className={`h-10 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${themeMode === 'light' ? 'bg-bg-elevated border-line text-ink' : 'bg-bg-card border-line/60 text-ink-muted'}`}
-            >
-              <Sun className="w-3.5 h-3.5" /> Светлая
-            </button>
-            <button
-              type="button"
-              onClick={() => setTheme('dark')}
-              className={`h-10 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${themeMode === 'dark' ? 'bg-bg-elevated border-line text-ink' : 'bg-bg-card border-line/60 text-ink-muted'}`}
-            >
-              <Moon className="w-3.5 h-3.5" /> Тёмная
-            </button>
-            <button
-              type="button"
-              onClick={() => setTheme('system')}
-              className={`h-10 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${themeMode === 'system' ? 'bg-bg-elevated border-line text-ink' : 'bg-bg-card border-line/60 text-ink-muted'}`}
-            >
-              <Monitor className="w-3.5 h-3.5" /> Система
-            </button>
-          </div>
-        </div>
-      </Card>
-
       {/* ORG */}
       <Card hoverable className="p-5">
         <div className="flex items-center justify-between mb-3">
@@ -232,6 +195,80 @@ export default function SettingsScreen() {
             ))}
           </div>
         )}
+      </Card>
+
+      {/* EMPLOYEES */}
+      <Link to="/employees" className="block mt-3 active:scale-[0.99] transition-transform">
+        <Card hoverable className="p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-bg-elevated border border-line/50 flex items-center justify-center text-brand-500 flex-shrink-0">
+                <Users className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-semibold text-ink">Сотрудники</div>
+                <div className="text-xs text-ink-muted truncate">Управление командой и приглашениями</div>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-ink-soft flex-shrink-0" />
+          </div>
+        </Card>
+      </Link>
+
+      {/* PERMISSIONS */}
+      <Link to="/employees" className="block mt-3 active:scale-[0.99] transition-transform">
+        <Card hoverable className="p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-bg-elevated border border-line/50 flex items-center justify-center text-brand-500 flex-shrink-0">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-semibold text-ink">Доступы</div>
+                <div className="text-xs text-ink-muted truncate">Роли и детальные права сотрудников</div>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-ink-soft flex-shrink-0" />
+          </div>
+        </Card>
+      </Link>
+
+      {/* THEME SELECTION */}
+      <Card className="mt-3 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-bg-elevated border border-line/50 flex items-center justify-center text-brand-500 flex-shrink-0">
+              {theme === 'dark' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+            </div>
+            <div className="min-w-0">
+              <div className="font-semibold text-ink">Тема оформления</div>
+              <div className="text-xs text-ink-muted truncate">{themeLabel}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            <button
+              type="button"
+              onClick={() => setTheme('light')}
+              className={`h-10 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer select-none ${themeMode === 'light' ? 'bg-bg-elevated border-brand-500/35 text-brand-400 shadow-sm' : 'bg-bg-card border-line/45 text-ink-muted'}`}
+            >
+              <Sun className="w-3.5 h-3.5" /> Светлая
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme('dark')}
+              className={`h-10 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer select-none ${themeMode === 'dark' ? 'bg-bg-elevated border-brand-500/35 text-brand-400 shadow-sm' : 'bg-bg-card border-line/45 text-ink-muted'}`}
+            >
+              <Moon className="w-3.5 h-3.5" /> Тёмная
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme('system')}
+              className={`h-10 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer select-none ${themeMode === 'system' ? 'bg-bg-elevated border-brand-500/35 text-brand-400 shadow-sm' : 'bg-bg-card border-line/45 text-ink-muted'}`}
+            >
+              <Monitor className="w-3.5 h-3.5" /> Система
+            </button>
+          </div>
+        </div>
       </Card>
 
       <OrgSheet

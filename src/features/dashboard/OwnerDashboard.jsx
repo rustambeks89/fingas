@@ -9,19 +9,10 @@
 //   5. Геймифицированный плиточный список отчетов (QUICK REPORTS)
 // Все расчеты, RLS, вызовы Supabase и дельты сохранены на 100% в исходном виде.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+const TrendChart = lazy(() => import('./TrendChart'));
 import {
   AlertTriangle,
   Building2,
@@ -36,21 +27,28 @@ import {
   Users,
   Wallet,
   Sparkles,
+  FileText,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { TankCard, TankCardSkeleton } from '@/components/charts/TankCard';
-import {
-  compareWindows,
-  computeFifoCost,
-} from '@/services/salesService';
+import { Wrench, Gauge } from 'lucide-react';
+
+// Quick forms and bottom sheet for reservoir click triggers
+import { BottomSheet } from '@/components/bottom-sheets/BottomSheet';
+import { TankMeasurementQuickForm } from '@/features/quick-add/forms/TankMeasurementQuickForm';
+import { CalibrationQuickForm } from '@/features/quick-add/forms/CalibrationQuickForm';
+import { CashflowQuickForm } from '@/features/quick-add/forms/CashflowQuickForm';
+import { TankAdjustmentQuickForm } from '@/features/quick-add/forms/TankAdjustmentQuickForm';
 import { getTankStatusesWithBalance } from '@/services/tankService';
 import { listEmployees } from '@/services/profileService';
 import {
   aggregateBalanceByDay,
   aggregateBalanceByMonth,
   listPendingShiftReports,
+  getCurrentSalesShift,
 } from '@/services/shiftService';
+import { aggregateForShift } from '@/services/salesService';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { formatMoney, formatLiters } from '@/lib/formatters';
@@ -68,11 +66,11 @@ const PERIODS = [
 
 const REPORTS = [
   { to: '/shifts',          label: 'Сменный отчёт',         icon: ClipboardList, desc: 'Смены · сверка · расхождения' },
-  { to: '/pl',              label: 'Прибыли и убытки',      icon: TrendingUp,    desc: 'Выручка · себест. · маржа' },
-  { to: '/counterparties',  label: 'Контрагенты и долги',   icon: Users,         desc: 'Сальдо · долги · поставщики' },
-  { to: '/fuel-balances',   label: 'Резервуары',            icon: Droplets,      desc: 'Остатки и замеры' },
-  { to: '/cashflow',        label: 'Движение денег',        icon: Wallet,        desc: 'Приход · расход · поток' },
+  { to: '/pl',              label: 'P&L',                   icon: TrendingUp,    desc: 'Выручка · себест. · маржа' },
+  { to: '/counterparties',  label: 'Контрагенты',           icon: Users,         desc: 'Сальдо · долги · поставщики' },
+  { to: '/cashflow',        label: 'Кэшфлоу',               icon: Wallet,        desc: 'Приход · расход · поток' },
   { to: '/taxes',           label: 'Налоги',                icon: Receipt,       desc: 'Платежи и периоды' },
+  { to: '/documents',       label: 'Документы',             icon: FileText,      desc: 'Накладные · чеки · акты' },
 ];
 
 const TANK_STATUS_META = {
@@ -106,122 +104,123 @@ function rangeFor(period) {
   return { from, to };
 }
 
-function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
-function endOfDay(d)   { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; }
-
 export default function OwnerDashboard() {
   const { user } = useAuth();
   const profile = user?.profile;
   const orgId = profile?.organization_id;
   const stationId = profile?.station_id;
 
+  const navigate = useNavigate();
   const [period, setPeriod] = useState('week');
   const [showAllReports, setShowAllReports] = useState(false);
+  const [selectedTank, setSelectedTank] = useState(null);
+  const [activeFormType, setActiveFormType] = useState(null);
+  const [currentShift, setCurrentShift] = useState(null);
+  const [currentShiftLoading, setCurrentShiftLoading] = useState(false);
+
+  function handleFormDone() {
+    setActiveFormType(null);
+    setSelectedTank(null);
+    setTanksLoading(true);
+    getTankStatusesWithBalance({ organizationId: orgId, stationId })
+      .then((rows) => setTanks(rows))
+      .catch(() => setTanks([]))
+      .finally(() => setTanksLoading(false));
+  }
+
+  // Каждый блок грузится независимо. Ничего не ждёт «всех» —
+  // экран рисуется мгновенно, данные подтягиваются по мере готовности.
   const [trend, setTrend] = useState([]);
-  const [, setTodayCmp] = useState(null);
+  const [trendLoading, setTrendLoading] = useState(true);
   const [periodAgg, setPeriodAgg] = useState({ current: { revenue: 0, liters: 0, count: 0 } });
-  const [, setMargin] = useState({ revenue: 0, cost: 0, marginPct: null });
+
   const [alerts, setAlerts] = useState([]);
   const [tanks, setTanks] = useState([]);
-  const [showTankDetails, setShowTankDetails] = useState(false);
-  const [stationName, setStationName] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [tanksLoading, setTanksLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { from, to } = rangeFor(period);
-      const fromISO = from.toISOString();
-      const toISO = to.toISOString();
-      const fromDate = from.toISOString().slice(0, 10);
-      const toDate = to.toISOString().slice(0, 10);
+  const [stationName, setStationName] = useState(null);
 
-      const today = startOfDay(new Date());
-      const yesterday = startOfDay(new Date(today.getTime() - 86400000));
-      const yesterdayEnd = endOfDay(yesterday);
+  // Один признак для UI кнопок «период» — есть/нет данных для текущего period.
+  const loading = trendLoading;
 
-      // На годе график должен быть помесячный — 12 точек, а не 365.
-      // Тренд и итоги — из azs_balance (это правда от ТРК: счётчик×цена).
-      // azs_selling используется только для счётчика чеков в архиве смен.
+  // 1. Тренд + агрегат периода — из azs_selling (для 'day' в реальном времени) или azs_balance (для архивов).
+  //    На годе помесячно (12 точек), иначе по дням.
+  useEffect(() => {
+    let cancelled = false;
+    setTrendLoading(true);
+    const { from, to } = rangeFor(period);
+
+    if (period === 'day') {
+      aggregateForShift({ stationId, from: from.toISOString(), to: to.toISOString() })
+        .then((result) => {
+          if (cancelled) return;
+          // Строим 8 трехчасовых бакетов для красивого суточного графика
+          const buckets = [];
+          for (let i = 0; i < 8; i++) {
+            const bStart = new Date(from);
+            bStart.setHours(i * 3, 0, 0, 0);
+            const bEnd = new Date(from);
+            bEnd.setHours(i * 3 + 3, 0, 0, 0);
+            const label = `${String(i * 3).padStart(2, '0')}:00`;
+            buckets.push({
+              day: label,
+              label,
+              weekday: '',
+              revenue: 0,
+              liters: 0,
+              count: 0,
+            });
+          }
+
+          // Группируем транзакции azs_selling по бакетам
+          const rows = result.rows || [];
+          for (const r of rows) {
+            const dt = new Date(r.TransactionDatetime || r.transaction_datetime);
+            const hr = dt.getHours();
+            const bucketIndex = Math.floor(hr / 3);
+            if (bucketIndex >= 0 && bucketIndex < 8) {
+              buckets[bucketIndex].revenue += Number(r.ShopCost ?? 0);
+              buckets[bucketIndex].liters += Number(r.Volume ?? 0);
+              buckets[bucketIndex].count += 1;
+            }
+          }
+
+          setTrend(buckets);
+          setPeriodAgg({
+            current: {
+              revenue: result.revenue,
+              liters: result.liters,
+              count: result.count,
+            },
+          });
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setTrend([]);
+            setPeriodAgg({ current: { revenue: 0, liters: 0, count: 0 } });
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setTrendLoading(false);
+        });
+    } else {
       const trendLoader = period === 'year' ? aggregateBalanceByMonth : aggregateBalanceByDay;
-
-      const [cmp, daily, fifo, pendingShifts, requests, { data: collRows }, stationRow] = await Promise.all([
-        compareWindows({
-          currentFrom: today.toISOString(),
-          currentTo: new Date().toISOString(),
-          priorFrom: yesterday.toISOString(),
-          priorTo: yesterdayEnd.toISOString(),
-        }).catch(() => null),
-        trendLoader({ from: fromISO, to: toISO }).catch(() => []),
-        computeFifoCost({ from: fromDate, to: toDate }).catch(() => ({ total: 0 })),
-        listPendingShiftReports({}).catch(() => []),
-        listEmployees({ organizationId: orgId, status: PROFILE_STATUS.PENDING }).catch(() => []),
-        supabase
-          .from('cashflow')
-          .select('amount')
-          .eq('operation_type', 'collection')
-          .eq('status', 'pending_confirmation'),
-        stationId
-          ? supabase.from('stations').select('name, city').eq('id', stationId).maybeSingle().then(({ data }) => data)
-          : Promise.resolve(null),
-      ]);
-
-      setTodayCmp(cmp);
-      setTrend(daily);
-      setStationName(stationRow ? `${stationRow.name}${stationRow.city ? ` · ${stationRow.city}` : ''}` : null);
-
-      const periodRevenue = daily.reduce((s, d) => s + d.revenue, 0);
-      const periodLiters = daily.reduce((s, d) => s + d.liters, 0);
-      const periodCount = daily.reduce((s, d) => s + d.count, 0);
-      setPeriodAgg({ current: { revenue: periodRevenue, liters: periodLiters, count: periodCount } });
-
-      const cost = fifo.total ?? 0;
-      setMargin({
-        revenue: periodRevenue,
-        cost,
-        marginPct: periodRevenue > 0 ? ((periodRevenue - cost) / periodRevenue) * 100 : null,
-      });
-
-      // alerts
-      const a = [];
-      if (pendingShifts.length > 0) {
-        a.push({
-          tone: 'warn',
-          icon: ClipboardList,
-          title: `Смен на утверждении: ${pendingShifts.length}`,
-          desc: 'Проверьте сверки операторов',
-          to: '/shifts',
-        });
-      }
-      if (requests.length > 0) {
-        a.push({
-          tone: 'info',
-          icon: Users,
-          title: `Заявок сотрудников: ${requests.length}`,
-          desc: 'Ожидают одобрения',
-          to: '/employees',
-        });
-      }
-      const collTotal = (collRows ?? []).reduce((s, r) => s + Number(r.amount ?? 0), 0);
-      if (collTotal > 0) {
-        a.push({
-          tone: 'info',
-          icon: Wallet,
-          title: `Инкассации: ${formatMoney(collTotal)}`,
-          desc: 'Ждут подтверждения',
-          to: '/collections',
-        });
-      }
-      setAlerts(a);
-    } finally {
-      setLoading(false);
+      trendLoader({ stationId, from: from.toISOString(), to: to.toISOString() })
+        .then((daily) => {
+          if (cancelled) return;
+          setTrend(daily);
+          const periodRevenue = daily.reduce((s, d) => s + d.revenue, 0);
+          const periodLiters  = daily.reduce((s, d) => s + d.liters, 0);
+          const periodCount   = daily.reduce((s, d) => s + d.count, 0);
+          setPeriodAgg({ current: { revenue: periodRevenue, liters: periodLiters, count: periodCount } });
+        })
+        .catch(() => { if (!cancelled) { setTrend([]); setPeriodAgg({ current: { revenue: 0, liters: 0, count: 0 } }); } })
+        .finally(() => { if (!cancelled) setTrendLoading(false); });
     }
-  }, [period, orgId, stationId]);
+    return () => { cancelled = true; };
+  }, [period, stationId]);
 
-  useEffect(() => { load(); }, [load]);
-
-  // Tanks load separately
+  // 2. Tanks — отдельный лёгкий запрос.
   useEffect(() => {
     let cancelled = false;
     setTanksLoading(true);
@@ -231,6 +230,90 @@ export default function OwnerDashboard() {
       .finally(() => { if (!cancelled) setTanksLoading(false); });
     return () => { cancelled = true; };
   }, [orgId, stationId]);
+
+  // 3. Название станции — один маленький запрос, не блокирует ничего.
+  useEffect(() => {
+    if (!stationId) { setStationName(null); return; }
+    let cancelled = false;
+    supabase
+      .from('stations')
+      .select('name, city')
+      .eq('id', stationId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setStationName(`${data.name}${data.city ? ` · ${data.city}` : ''}`);
+      });
+    return () => { cancelled = true; };
+  }, [stationId]);
+
+  // 3.5. Получение активной смены для отображения текущей выручки
+  useEffect(() => {
+    if (!stationId) { setCurrentShift(null); return; }
+    let cancelled = false;
+    setCurrentShiftLoading(true);
+    getCurrentSalesShift({ stationId })
+      .then((shift) => {
+        if (!cancelled) setCurrentShift(shift);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentShift(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCurrentShiftLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [stationId]);
+
+  // 4. Алерты — три параллельных независимых запроса. Каждый шлёт свой
+  //    апдейт в общий список, а не ждёт остальных.
+  useEffect(() => {
+    let cancelled = false;
+    const collected = { shifts: 0, requests: 0, collTotal: 0 };
+
+    function rebuild() {
+      if (cancelled) return;
+      const a = [];
+      if (collected.shifts > 0) {
+        a.push({ tone: 'warn', icon: ClipboardList,
+          title: `Смен на утверждении: ${collected.shifts}`,
+          desc: 'Проверьте сверки операторов', to: '/shifts' });
+      }
+      if (collected.requests > 0) {
+        a.push({ tone: 'info', icon: Users,
+          title: `Заявок сотрудников: ${collected.requests}`,
+          desc: 'Ожидают одобрения', to: '/employees' });
+      }
+      if (collected.collTotal > 0) {
+        a.push({ tone: 'info', icon: Wallet,
+          title: `Инкассации: ${formatMoney(collected.collTotal)}`,
+          desc: 'Ждут подтверждения', to: '/collections' });
+      }
+      setAlerts(a);
+    }
+
+    listPendingShiftReports({}).then((rows) => {
+      collected.shifts = rows?.length ?? 0; rebuild();
+    }).catch(() => {});
+
+    if (orgId) {
+      listEmployees({ organizationId: orgId, status: PROFILE_STATUS.PENDING })
+        .then((rows) => { collected.requests = rows?.length ?? 0; rebuild(); })
+        .catch(() => {});
+    }
+
+    supabase
+      .from('cashflow')
+      .select('amount')
+      .eq('operation_type', 'collection')
+      .eq('status', 'pending_confirmation')
+      .then(({ data }) => {
+        collected.collTotal = (data ?? []).reduce((s, r) => s + Number(r.amount ?? 0), 0);
+        rebuild();
+      });
+
+    return () => { cancelled = true; };
+  }, [orgId]);
 
   // Add tank-derived alerts
   const allAlerts = useMemo(() => {
@@ -310,9 +393,15 @@ export default function OwnerDashboard() {
             <div className="text-3xl font-extrabold text-ink mt-1.5 tracking-tight tabular-nums select-all">
               {loading ? '…' : formatMoney(periodAgg.current.revenue)}
             </div>
-            <div className="text-xs text-ink-muted mt-1 font-bold truncate">
-              {loading ? '…' : `${formatLiters(periodAgg.current.liters)} · ${periodAgg.current.count.toLocaleString('ru-RU')} чеков`}
-            </div>
+            {period === 'day' && currentShift && (
+              <div className="text-xs text-success mt-1 font-bold truncate flex items-center gap-1.5">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
+                </span>
+                Текущая активная смена #{currentShift.shiftKey}
+              </div>
+            )}
           </div>
         </div>
 
@@ -345,62 +434,9 @@ export default function OwnerDashboard() {
         {/* Chart area */}
         <div className="h-44 mt-2">
           {trendWithMA.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={trendWithMA} margin={{ top: 6, right: 0, left: -22, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="ownerRevGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#E11D48" stopOpacity={0.45} />
-                    <stop offset="100%" stopColor="#E11D48" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="rgba(148,163,184,0.06)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  stroke="#94A3B8"
-                  fontSize={10}
-                  fontWeight={600}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  stroke="#94A3B8"
-                  fontSize={10}
-                  fontWeight={600}
-                  tickLine={false}
-                  axisLine={false}
-                  width={40}
-                  tickFormatter={(v) => v >= 1000 ? `${Math.round(v / 1000)}к` : String(v)}
-                />
-                <Tooltip
-                  cursor={{ stroke: 'rgba(225,29,72,0.2)', strokeWidth: 1.5 }}
-                  contentStyle={{
-                    background: 'var(--color-bg-card)',
-                    border: '1px solid var(--color-brand-500)',
-                    borderRadius: 12,
-                    fontSize: 11,
-                    fontWeight: 'bold',
-                    boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)'
-                  }}
-                  formatter={(v) => formatMoney(v)}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="revenue"
-                  stroke="#E11D48"
-                  strokeWidth={2.5}
-                  fill="url(#ownerRevGrad)"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="ma"
-                  stroke="#94A3B8"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 4"
-                  dot={false}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+            <Suspense fallback={<ChartSkeleton />}>
+              <TrendChart data={trendWithMA} />
+            </Suspense>
           ) : (
             <div className="h-full flex items-center justify-center bg-bg-soft/40 dark:bg-black/10 rounded-2xl border border-line/20">
               <div className="text-xs text-ink-muted text-center py-6">
@@ -434,55 +470,15 @@ export default function OwnerDashboard() {
           icon={Droplets}
           title="Запасы топлива"
           right={tanks.length > 0 ? `${tanks.length} резервуаров` : ''}
-          action={tanks.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setShowTankDetails((v) => !v)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-line/30 bg-bg-elevated/80 px-3.5 py-1 text-[10px] font-black text-ink hover:text-brand-400 hover:border-brand-500/30 transition-all active:scale-95 cursor-pointer select-none"
-            >
-              {showTankDetails ? (
-                <>
-                  <ChevronDown className="w-3.5 h-3.5 rotate-180 text-brand-400" />
-                  Свернуть
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="w-3.5 h-3.5 text-brand-400" />
-                  Развернуть
-                </>
-              )}
-            </button>
-          ) : null}
         />
         {tanksLoading ? (
-          showTankDetails ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {[0, 1].map((i) => <TankCardSkeleton key={i} />)}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {[0, 1].map((i) => <TankSummarySkeleton key={i} />)}
-            </div>
-          )
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {[0, 1].map((i) => <TankCardSkeleton key={i} />)}
+          </div>
         ) : tanks.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-line/60 p-6 text-center text-xs text-ink-muted">
             Резервуары АЗС пока не добавлены.{' '}
             <Link className="text-brand-400 font-bold hover:underline" to="/tanks">Добавить резервуар</Link>
-          </div>
-        ) : !showTankDetails ? (
-          <div className="space-y-2.5">
-            {tanks.map((t) => (
-              <TankSummaryRow
-                key={t.id}
-                name={t.name}
-                number={t.number}
-                fuel={t.fuelCode}
-                fuelColor={t.fuel_type?.color || '#FF4D3D'}
-                current={t.currentLiters}
-                capacity={t.capacityLiters}
-                status={t.currentLiters > 0 ? t.status : 'unknown'}
-              />
-            ))}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -490,7 +486,9 @@ export default function OwnerDashboard() {
               <motion.div
                 key={t.id}
                 whileHover={{ scale: 1.01 }}
-                className="transition-transform duration-250"
+                whileTap={{ scale: 0.99 }}
+                className="transition-transform duration-250 cursor-pointer"
+                onClick={() => setSelectedTank(t)}
               >
                 <TankCard
                   name={t.name}
@@ -515,7 +513,7 @@ export default function OwnerDashboard() {
         <SectionTitle icon={ShieldCheck} title="Аналитические отчёты" right={`${REPORTS.length}`} />
         <div className="grid grid-cols-1 gap-2">
           <AnimatePresence initial={false}>
-            {(showAllReports ? REPORTS : REPORTS.slice(0, 3)).map((r, idx) => (
+            {REPORTS.map((r, idx) => (
               <motion.div
                 key={r.to}
                 initial={{ opacity: 0, height: 0 }}
@@ -545,21 +543,207 @@ export default function OwnerDashboard() {
             ))}
           </AnimatePresence>
         </div>
-        {REPORTS.length > 3 && (
-          <button
-            type="button"
-            onClick={() => setShowAllReports((v) => !v)}
-            className="w-full mt-3 text-xs font-black text-brand-400 hover:text-brand-500 py-1.5 border border-dashed border-line/45 rounded-xl hover:border-brand-500/30 transition-all duration-200 cursor-pointer select-none"
-          >
-            {showAllReports ? 'Свернуть список' : `Показать ещё ${REPORTS.length - 3} отчетов`}
-          </button>
-        )}
       </Card>
+
+      {/* TANK QUICK ACTION DIALOG SHEET */}
+      <BottomSheet
+        open={selectedTank !== null}
+        onClose={() => {
+          setSelectedTank(null);
+          setActiveFormType(null);
+        }}
+        title={activeFormType ? (
+          activeFormType === 'measurement' ? 'Замер резервуара' :
+          activeFormType === 'calibration' ? 'Поверка ТРК' : 'Корректировка баланса'
+        ) : (
+          selectedTank ? `Управление резервуаром №${selectedTank.number}` : 'Управление резервуаром'
+        )}
+      >
+        {selectedTank && (
+          <div className="relative overflow-hidden min-h-[220px] pt-1">
+            <AnimatePresence mode="wait">
+              {activeFormType ? (
+                <motion.div
+                  key="form-view"
+                  initial={{ opacity: 0, x: 28 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -28 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                  className="space-y-4"
+                >
+                  <div className="flex items-center gap-3 border-b border-dashed border-line/30 dark:border-white/[0.06] pb-3 select-none">
+                    <button
+                      type="button"
+                      onClick={() => setActiveFormType(null)}
+                      className="w-8 h-8 rounded-xl bg-bg-elevated/70 border border-line/30 flex items-center justify-center text-ink cursor-pointer hover:bg-bg-elevated"
+                    >
+                      <ChevronRight className="w-4.5 h-4.5 rotate-180" />
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[9px] uppercase tracking-[0.22em] text-brand-400 font-extrabold">Быстрый ввод</span>
+                      <div className="text-[10px] text-ink-muted mt-0.5 font-bold truncate">
+                        {selectedTank.name} · {selectedTank.fuelCode}
+                      </div>
+                    </div>
+                    <Badge tone="brand" className="font-extrabold uppercase text-[8px] tracking-wider px-2.5 py-1">
+                      {activeFormType === 'measurement' ? 'Замер' : activeFormType === 'calibration' ? 'Поверка' : 'Коррект.'}
+                    </Badge>
+                  </div>
+
+                  <div className="pt-1">
+                    {activeFormType === 'measurement' && (
+                      <TankMeasurementQuickForm
+                        defaultTankId={selectedTank.id}
+                        defaultFuelType={selectedTank.fuelCode}
+                        onDone={handleFormDone}
+                        onCancel={() => setActiveFormType(null)}
+                      />
+                    )}
+                    {activeFormType === 'calibration' && (
+                      <CalibrationQuickForm
+                        defaultFuelType={selectedTank.fuelCode}
+                        onDone={handleFormDone}
+                        onCancel={() => setActiveFormType(null)}
+                      />
+                    )}
+                    {activeFormType === 'adjustment' && (
+                      <TankAdjustmentQuickForm
+                        defaultTankId={selectedTank.id}
+                        defaultFuelType={selectedTank.fuelCode}
+                        onDone={handleFormDone}
+                        onCancel={() => setActiveFormType(null)}
+                      />
+                    )}
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="actions-view"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+                  className="space-y-4"
+                >
+                  {/* Custom Header Info */}
+                  <div className="rounded-2xl border border-line/30 bg-bg-elevated/40 p-3.5 flex items-center justify-between">
+                    <div>
+                      <div className="text-[9px] uppercase tracking-[0.22em] text-brand-400 font-extrabold">Топливный резервуар</div>
+                      <div className="text-sm font-bold text-ink mt-1">
+                        {selectedTank.fuelCode || '—'} · {selectedTank.name || `Резервуар №${selectedTank.number}`}
+                      </div>
+                    </div>
+                    <Badge tone={selectedTank.currentLiters > 0 ? 'success' : 'default'} className="font-extrabold">
+                      {selectedTank.currentLiters > 0 ? `${Math.round((selectedTank.currentLiters / selectedTank.capacityLiters) * 100)}%` : '—'}
+                    </Badge>
+                  </div>
+
+                  {/* Actions Grid */}
+                  <div className="grid grid-cols-1 gap-2">
+                    {/* Action 1: Внести замер */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveFormType('measurement')}
+                      className="flex items-center gap-3.5 rounded-2xl bg-bg-card border border-line/30 p-3.5 hover:border-brand-500/20 hover:bg-bg-soft/40 dark:hover:bg-white/[0.01] transition-all duration-200 shadow-sm relative group cursor-pointer"
+                    >
+                      <div className="absolute left-0 top-3 bottom-3 w-1 rounded-r-lg bg-brand-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                      <div className="w-9 h-9 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 flex-shrink-0 shadow-inner group-hover:scale-105 transition-transform duration-200">
+                        <Gauge className="w-4.5 h-4.5" />
+                      </div>
+                      <div className="flex-1 min-w-0 text-left">
+                        <div className="text-sm font-extrabold text-ink group-hover:text-brand-400 transition-colors">
+                          Внести замер резервуара
+                        </div>
+                        <div className="text-[10px] text-ink-muted font-bold mt-0.5">
+                          Ввести уровень (см) или литры текущего остатка
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4.5 h-4.5 text-ink-soft flex-shrink-0 group-hover:translate-x-0.5 transition-transform duration-200" />
+                    </button>
+
+                    {/* Action 2: Поверка ТРК */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveFormType('calibration')}
+                      className="flex items-center gap-3.5 rounded-2xl bg-bg-card border border-line/30 p-3.5 hover:border-brand-500/20 hover:bg-bg-soft/40 dark:hover:bg-white/[0.01] transition-all duration-200 shadow-sm relative group cursor-pointer"
+                    >
+                      <div className="absolute left-0 top-3 bottom-3 w-1 rounded-r-lg bg-brand-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                      <div className="w-9 h-9 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 flex-shrink-0 shadow-inner group-hover:scale-105 transition-transform duration-200">
+                        <Wrench className="w-4.5 h-4.5" />
+                      </div>
+                      <div className="flex-1 min-w-0 text-left">
+                        <div className="text-sm font-extrabold text-ink group-hover:text-brand-400 transition-colors">
+                          Провести поверку ТРК
+                        </div>
+                        <div className="text-[10px] text-ink-muted font-bold mt-0.5">
+                          Зафиксировать технический (мерный) пролив топлива
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4.5 h-4.5 text-ink-soft flex-shrink-0 group-hover:translate-x-0.5 transition-transform duration-200" />
+                    </button>
+
+                    {/* Action 3: Корректировка остатка */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveFormType('adjustment')}
+                      className="flex items-center gap-3.5 rounded-2xl bg-bg-card border border-line/30 p-3.5 hover:border-brand-500/20 hover:bg-bg-soft/40 dark:hover:bg-white/[0.01] transition-all duration-200 shadow-sm relative group cursor-pointer"
+                    >
+                      <div className="absolute left-0 top-3 bottom-3 w-1 rounded-r-lg bg-brand-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                      <div className="w-9 h-9 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 flex-shrink-0 shadow-inner group-hover:scale-105 transition-transform duration-200">
+                        <Receipt className="w-4.5 h-4.5" />
+                      </div>
+                      <div className="flex-1 min-w-0 text-left">
+                        <div className="text-sm font-extrabold text-ink group-hover:text-brand-400 transition-colors">
+                          Корректировка остатка
+                        </div>
+                        <div className="text-[10px] text-ink-muted font-bold mt-0.5">
+                          Списать/начислить разницу для сверки баланса
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4.5 h-4.5 text-ink-soft flex-shrink-0 group-hover:translate-x-0.5 transition-transform duration-200" />
+                    </button>
+
+                    {/* Action 4: Подробная история резервуара */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTank(null);
+                        navigate(`/tanks/${selectedTank.id}`);
+                      }}
+                      className="flex items-center gap-3.5 rounded-2xl bg-bg-card border border-line/30 p-3.5 hover:border-brand-500/20 hover:bg-bg-soft/40 dark:hover:bg-white/[0.01] transition-all duration-200 shadow-sm relative group cursor-pointer"
+                    >
+                      <div className="absolute left-0 top-3 bottom-3 w-1 rounded-r-lg bg-brand-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                      <div className="w-9 h-9 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 flex-shrink-0 shadow-inner group-hover:scale-105 transition-transform duration-200">
+                        <Building2 className="w-4.5 h-4.5" />
+                      </div>
+                      <div className="flex-1 min-w-0 text-left">
+                        <div className="text-sm font-extrabold text-ink group-hover:text-brand-400 transition-colors">
+                          Открыть подробную карточку
+                        </div>
+                        <div className="text-[10px] text-ink-muted font-bold mt-0.5">
+                          История поставок, замеры, температурные показатели и графики
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4.5 h-4.5 text-ink-soft flex-shrink-0 group-hover:translate-x-0.5 transition-transform duration-200" />
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+      </BottomSheet>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
+function ChartSkeleton() {
+  return (
+    <div className="h-full w-full rounded-2xl bg-bg-elevated/40 border border-line/20 animate-pulse" />
+  );
+}
+
 function AlertRow({ alert }) {
   const { tone, icon: Icon, title, desc, to } = alert;
   const wrap =

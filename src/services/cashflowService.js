@@ -49,51 +49,12 @@ export async function deleteCashflow(id) {
   if (error) throw error;
 }
 
+// Удаление cashflow-строки. Если строка — это «оплата поставщику»
+// (operation_type='supplier_payment'), серверный триггер
+// `trg_fingas_sync_supplier_payment_cashflow_delete` (миграция 0022)
+// автоматически вернёт долг на counterparties.balance и удалит
+// связанную строку supplier_payments. От JS дополнительно ничего не нужно.
 export async function deleteCashflowWithSync(id) {
-  const { data: row, error: rowErr } = await supabase
-    .from('cashflow')
-    .select('id, operation_type, amount, counterparty_id')
-    .eq('id', id)
-    .maybeSingle();
-  if (rowErr) throw rowErr;
-  if (!row) return;
-
-  if (row.operation_type === 'supplier_payment') {
-    const { data: payment, error: payErr } = await supabase
-      .from('supplier_payments')
-      .select('id, supplier_id, amount')
-      .eq('cashflow_id', id)
-      .maybeSingle();
-    if (payErr) throw payErr;
-
-    const supplierId = payment?.supplier_id ?? row.counterparty_id ?? null;
-    const amount = Number(payment?.amount ?? row.amount ?? 0);
-
-    if (supplierId && amount) {
-      const { data: supplier, error: supplierErr } = await supabase
-        .from('counterparties')
-        .select('balance')
-        .eq('id', supplierId)
-        .maybeSingle();
-      if (supplierErr) throw supplierErr;
-
-      const nextBalance = Number(supplier?.balance ?? 0) + amount;
-      const { error: balanceErr } = await supabase
-        .from('counterparties')
-        .update({ balance: nextBalance })
-        .eq('id', supplierId);
-      if (balanceErr) throw balanceErr;
-    }
-
-    if (payment) {
-      const { error: paymentDelErr } = await supabase
-        .from('supplier_payments')
-        .delete()
-        .eq('id', payment.id);
-      if (paymentDelErr) throw paymentDelErr;
-    }
-  }
-
   const { error } = await supabase.from('cashflow').delete().eq('id', id);
   if (error) throw error;
 }
