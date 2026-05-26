@@ -48,3 +48,4 @@ npm run build     # production build
 npm run preview   # serve dist/
 npm run lint      # eslint
 ```
+# fingas
