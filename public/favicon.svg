@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- Ultra-clean glowing bold letter F representing fingas -->
+  <text x="50%" y="58%" 
+        dominant-baseline="middle" 
+        text-anchor="middle" 
+        font-family="Trebuchet MS, Outfit, sans-serif" 
+        font-weight="900" 
+        font-size="82" 
+        fill="#FF2E63"
+        style="filter: drop-shadow(0px 0px 10px rgba(255, 46, 99, 0.5));">F</text>
+</svg>

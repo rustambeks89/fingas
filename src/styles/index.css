@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-bg-default: #F8FAFC; /* Slate 50 */
+    --color-bg-soft: #F1F5F9; /* Slate 100 */
+    --color-bg-card: rgba(255, 255, 255, 0.95);
+    --color-bg-elevated: rgba(241, 245, 249, 0.96);
+
+    --color-ink-default: #0F172A; /* Slate 900 */
+    --color-ink-muted: #475569; /* Slate 600 */
+    --color-ink-soft: #94A3B8; /* Slate 400 */
+
+    --color-line: transparent; /* COMPREHENSIVELY REMOVE ALL BORDERS */
+    color-scheme: light;
+  }
+
+  .dark {
+    /* Rich, gorgeous Midnight Sapphire / Deep Navy Blue background with great visibility */
+    --color-bg-default: #0A1128; 
+    --color-bg-soft: #111E3F;
+    --color-bg-card: rgba(17, 29, 60, 0.85); 
+    --color-bg-elevated: rgba(25, 42, 85, 0.90);
+
+    --color-ink-default: #F8FAFC;
+    --color-ink-muted: #E2E8F0; /* Slate 200 - ultra-clear and highly legible on navy backgrounds */
+    --color-ink-soft: #94A3B8; /* Slate 400 */
+
+    --color-line: transparent; /* COMPREHENSIVELY REMOVE ALL BORDERS */
+    color-scheme: dark;
+  }
+
+  html, body, #root {
+    height: 100%;
+    background: theme('colors.bg.DEFAULT');
+    color: theme('colors.ink.DEFAULT');
+    font-family: theme('fontFamily.sans');
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+    transition: background-color 220ms ease, border-color 220ms ease, color 150ms ease;
+  }
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    background: theme('colors.brand.500');
+    color: #FFFFFF;
+  }
+}
+
+@layer utilities {
+  .safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 0.75rem); }
+  .safe-top    { padding-top:    max(env(safe-area-inset-top),    0.75rem); }
+  
+  .glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: none !important;
+    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.02);
+  }
+  .dark .glass {
+    background: rgba(8, 14, 28, 0.75);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: none !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  }
+  
+  .glass-premium {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
+    border: none !important;
+    box-shadow: theme('boxShadow.glass-shadow');
+  }
+  .dark .glass-premium {
+    background: rgba(8, 14, 28, 0.85);
+    backdrop-filter: blur(32px);
+    -webkit-backdrop-filter: blur(32px);
+    border: none !important;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Force all borders in elements utilizing border classes to transparent */
+  .border,
+  .border-b,
+  .border-t,
+  .border-l,
+  .border-r,
+  [class*="border-line"],
+  [class*="border-white/"],
+  [class*="border-brand-500/"] {
+    border-color: transparent !important;
+  }
+
+  .dark .border-transparent,
+  .border-transparent {
+    border-color: transparent !important;
+  }
+
+  /* Styling inputs and textareas to be borderless and relying on clean background tins */
+  input,
+  select,
+  textarea {
+    border: none !important;
+    background: rgba(15, 23, 42, 0.04) !important;
+    box-shadow: none !important;
+  }
+
+  .dark input,
+  .dark select,
+  .dark textarea {
+    border: none !important;
+    background: rgba(14, 22, 42, 0.6) !important;
+    box-shadow: none !important;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(159, 18, 57, 0.2) !important;
+  }
+  
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}
