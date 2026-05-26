@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#1F232B"/>
+      <stop offset="55%" stop-color="#11141A"/>
+      <stop offset="100%" stop-color="#06080C"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0%"  stop-color="#FCA5B7"/>
+      <stop offset="45%" stop-color="#F43F5E"/>
+      <stop offset="100%" stop-color="#9F1239"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.35" r="0.7">
+      <stop offset="0%"  stop-color="#F43F5E" stop-opacity="0.35"/>
+      <stop offset="60%" stop-color="#F43F5E" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#F43F5E" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <!-- iOS закругляет автоматически, но рисуем фон без скруглений
+       чтобы маска маски совпадала корректно для всех режимов. -->
+  <rect width="180" height="180" fill="url(#bg)"/>
+  <rect width="180" height="180" fill="url(#glow)"/>
+
+  <!-- Тонкая внутренняя обводка для премиального вида -->
+  <rect x="1" y="1" width="178" height="178" fill="none"
+        stroke="#FFFFFF" stroke-opacity="0.05" stroke-width="1"/>
+
+  <!-- Bold geometric F с двумя горизонталями + засечкой снизу. -->
+  <g filter="url(#shadow)">
+    <path d="M52 40
+             h82
+             a8 8 0 0 1 0 16
+             H72
+             v24
+             h48
+             a8 8 0 0 1 0 16
+             H72
+             v44
+             a8 8 0 0 1 -16 0
+             V48
+             a8 8 0 0 1 -4 -8
+             a8 8 0 0 1 8 -8 z"
+          fill="url(#brand)"/>
+  </g>
+
+  <!-- Лёгкий световой акцент сверху на букве -->
+  <path d="M58 40 h70 a8 8 0 0 1 8 8 v2 H58 z"
+        fill="#FFFFFF" fill-opacity="0.12"/>
+</svg>
