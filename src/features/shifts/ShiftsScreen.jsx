@@ -49,18 +49,18 @@ import { MODULES } from '@/lib/constants';
 import { formatDateTime, formatLiters, formatMoney } from '@/lib/formatters';
 
 const PERIODS = [
-  { id: '7d',  label: '7 дн.',  days: 7  },
-  { id: '30d', label: '30 дн.', days: 30 },
-  { id: 'mtd', label: 'Месяц'           },
+  { id: 'week',  label: 'Неделя' },
+  { id: 'month', label: 'Месяц'  },
+  { id: 'year',  label: 'Год'    },
 ];
 
 function rangeFor(id) {
   const now = new Date();
   const to = new Date(now);
   let from;
-  if (id === '7d') from = new Date(now.getTime() - 6 * 86400000);
-  else if (id === '30d') from = new Date(now.getTime() - 29 * 86400000);
-  else from = new Date(now.getFullYear(), now.getMonth(), 1);
+  if (id === 'week')       from = new Date(now.getTime() - 6 * 86400000);
+  else if (id === 'month') from = new Date(now.getFullYear(), now.getMonth(), 1);
+  else                     from = new Date(now.getFullYear(), 0, 1);
   from.setHours(0, 0, 0, 0);
   return { from, to };
 }
@@ -74,7 +74,7 @@ export default function ShiftsScreen() {
   const canReview = canApprove(MODULES.SHIFTS);
   const canRenameOperator = canEdit(MODULES.SHIFTS);
 
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('week');
   const [current, setCurrent] = useState(null);
   const [shifts, setShifts] = useState([]);
   const [pending, setPending] = useState([]);

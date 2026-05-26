@@ -22,15 +22,15 @@ export default {
         },
         line: 'var(--color-line)',
         brand: {
-          50: '#FFF1F2',
-          100: '#FFE4E6',
-          400: '#E11D48',
-          500: '#9F1239', // Premium Deep Crimson Red
-          600: '#881337', // Deep Crimson Red
-          700: '#4C0519', // Ultra Dark Crimson Red
+          50: '#FEF2F2',
+          100: '#FEE2E2',
+          400: '#F87171',
+          500: '#EF4444', // Pleasant Vibrant Red
+          600: '#DC2626', // Pleasant Rich Red
+          700: '#B91C1C', // Dark Rich Red
         },
         success: '#10B981',
-        warning: '#9F1239', // Coordinated Crimson Red
+        warning: '#EF4444', // Coordinated Vibrant Red
         danger: '#EF4444',
         info: '#3B82F6',
       },
@@ -60,9 +60,9 @@ export default {
       },
       boxShadow: {
         card: '0 1px 2px rgba(0,0,0,0.05), 0 8px 24px rgba(0,0,0,0.04)',
-        'card-premium': '0 20px 40px -15px rgba(0, 0, 0, 0.6), 0 0 20px rgba(159, 12, 57, 0.05), inset 0 1px 0px 0px rgba(255, 255, 255, 0.08)',
+        'card-premium': '0 20px 40px -15px rgba(0, 0, 0, 0.6), 0 0 20px rgba(239, 68, 68, 0.05), inset 0 1px 0px 0px rgba(255, 255, 255, 0.08)',
         'glass-shadow': 'inset 0 1px 1px 0px rgba(255, 255, 255, 0.12), 0 12px 40px -12px rgba(0, 0, 0, 0.4)',
-        glow: '0 0 30px 4px rgba(159, 18, 57, 0.35)',
+        glow: '0 0 30px 4px rgba(239, 68, 68, 0.35)',
         sheet: '0 -8px 40px rgba(0, 0, 0, 0.3)',
       },
       backdropBlur: {

@@ -36,7 +36,9 @@ import { aggregateByShift, listSales } from './salesService';
 // outage, operator re-login, restart). We merge into a single "shiftGroup" when:
 //   - same shop_key
 //   - same operator_final_name
-//   - start of the next shift is within MERGE_GAP_HOURS of the prev end
+//   - start of the next shift is within MERGE_GAP_MINUTES of the prev end
+//     (короткая щель = случайное закрытие+открытие; обычные смены идут
+//     ~24 ч и не должны клеиться только потому что один и тот же оператор)
 //   - OR the shifts overlap.
 //
 // Operator override: lookup public.shift_operator_overrides on (org, shop, shift_key).
@@ -44,8 +46,10 @@ import { aggregateByShift, listSales } from './salesService';
 
 const COUNTER_FLOOR = 1_000_000;
 const SHIFT_HISTORY_FLOOR = 631;
-const MERGE_GAP_HOURS = 4;
-const MERGE_GAP_MS = MERGE_GAP_HOURS * 60 * 60 * 1000;
+// 15 мин — реалистичный потолок для «ошибочно закрыл и сразу открыл».
+// Всё что больше — это уже отдельные смены, даже если оператор тот же.
+const MERGE_GAP_MINUTES = 15;
+const MERGE_GAP_MS = MERGE_GAP_MINUTES * 60 * 1000;
 const SHIFT_KEY_CHUNK = 200;
 const SELLING_META_PAGE = 5000;
 
@@ -152,7 +156,7 @@ async function loadAzsShiftMetaByShiftKeys({ shopKey, shiftKeys }) {
     const chunk = keys.slice(i, i + SHIFT_KEY_CHUNK);
     let q = supabase
       .from('azs_shift')
-      .select('ShiftKey, ShopKey, DatetimeShiftBegin, DatetimeShiftEnd')
+      .select('*')
       .in('ShiftKey', chunk)
       .limit(SHIFT_KEY_CHUNK * 4);
     if (shopKey != null) q = q.eq('ShopKey', shopKey);
@@ -165,12 +169,15 @@ async function loadAzsShiftMetaByShiftKeys({ shopKey, shiftKeys }) {
       if (key == null) continue;
       const startedAt = pickShiftStartTimestamp(row);
       const endedAt = pickShiftEndTimestamp(row);
+      const operator =
+        row.OperatorName ?? row.operator_name ?? row.Operator ?? row.operator ?? null;
       const existing = meta.get(key);
 
       if (!existing) {
         meta.set(key, {
           firstAt: startedAt ?? endedAt ?? null,
           lastAt: endedAt ?? startedAt ?? null,
+          operator: operator && String(operator).trim() ? String(operator).trim() : null,
         });
         continue;
       }
@@ -180,6 +187,9 @@ async function loadAzsShiftMetaByShiftKeys({ shopKey, shiftKeys }) {
       }
       if (endedAt && (!existing.lastAt || endedAt > existing.lastAt)) {
         existing.lastAt = endedAt;
+      }
+      if (!existing.operator && operator && String(operator).trim()) {
+        existing.operator = String(operator).trim();
       }
     }
   }
@@ -300,10 +310,28 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
   const keys = [...shifts.keys()];
   if (keys.length === 0) return [];
 
+  // Selling-мета не должна валить весь архив. Если запрос упадёт (RLS,
+  // лимиты, сеть) — покажем смены без чеков, а ошибку выведем в консоль
+  // чтобы можно было диагностировать.
   const [shiftByKey, sellingByKey] = await Promise.all([
-    loadAzsShiftMetaByShiftKeys({ shopKey, shiftKeys: keys }).catch(() => new Map()),
-    loadSellingMetaByShiftKeys({ shopKey, shiftKeys: keys }),
+    loadAzsShiftMetaByShiftKeys({ shopKey, shiftKeys: keys }).catch((e) => {
+      console.warn('[shiftService] azs_shift meta failed:', e?.message ?? e);
+      return new Map();
+    }),
+    loadSellingMetaByShiftKeys({ shopKey, shiftKeys: keys }).catch((e) => {
+      console.warn('[shiftService] azs_selling meta failed:', e?.message ?? e);
+      return new Map();
+    }),
   ]);
+  console.info('[shiftService] keys:', keys.length, '| shift-meta:', shiftByKey.size, '| selling-meta:', sellingByKey.size);
+  if (shiftByKey.size > 0) {
+    const sample = [...shiftByKey.entries()][0];
+    console.info('[shiftService] sample shift meta:', sample[0], sample[1]);
+  }
+  if (sellingByKey.size > 0) {
+    const sample = [...sellingByKey.entries()][0];
+    console.info('[shiftService] sample selling meta:', sample[0], sample[1]);
+  }
 
   // 4. Pull overrides for these shifts
   const { data: overrides } = await supabase
@@ -323,7 +351,9 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
     const g = shifts.get(k);
     const s = sellingByKey.get(k);
     const h = shiftByKey.get(k);
-    const operatorOriginal = s?.operator ?? null;
+    // Оператор: приоритет azs_shift (авторитетная карточка смены), затем
+    // azs_selling (по транзакциям), затем override от админа.
+    const operatorOriginal = h?.operator ?? s?.operator ?? null;
     const operatorOverride = overrideMap.get(`${g.shopKey}:${k}`) ?? null;
     const operatorFinal = operatorOverride && operatorOverride.trim() ? operatorOverride : (operatorOriginal ?? '—');
     return {
@@ -596,11 +626,13 @@ export async function listSalesShiftGroups({
   limit = 30,
   includeCurrent = true,
 } = {}) {
-  const archived = await listShiftsFromBalance({ stationId, from, to, limit: 1000 }).catch(() => []);
+  const archived = await listShiftsFromBalance({ stationId, from, to, limit: 1000 })
+    .catch((e) => { console.error('[shiftService] listShiftsFromBalance failed:', e); throw e; });
   const rows = [...archived];
 
   if (includeCurrent) {
-    const current = await getCurrentSalesShift({ stationId }).catch(() => null);
+    const current = await getCurrentSalesShift({ stationId })
+      .catch((e) => { console.warn('[shiftService] getCurrentSalesShift failed:', e?.message ?? e); return null; });
     if (current) rows.push(current);
   }
 

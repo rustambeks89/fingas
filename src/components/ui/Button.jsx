@@ -7,14 +7,14 @@ import { cn } from '@/lib/cn';
 
 const VARIANTS = {
   primary:
-    'bg-gradient-to-tr from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white shadow-[0_4px_24px_rgba(159,12,57,0.45)] border border-brand-400/30 active:brightness-95 backdrop-blur-md relative overflow-hidden before:absolute before:inset-0 before:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.15),transparent_60%)]',
+    'bg-gradient-to-tr from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white shadow-[0_4px_24px_rgba(239,68,68,0.45)] border border-brand-400/30 active:brightness-95 backdrop-blur-md relative overflow-hidden before:absolute before:inset-0 before:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.15),transparent_60%)]',
   secondary:
     'bg-bg-card text-ink border border-line/45 hover:border-brand-500/60 active:bg-bg-elevated/50 backdrop-blur-md',
   ghost: 'bg-transparent text-ink hover:bg-bg-elevated/30 active:bg-bg-elevated/50',
   success:
     'bg-gradient-to-tr from-emerald-800 to-emerald-700 hover:from-emerald-700 hover:to-emerald-600 text-white shadow-[0_4px_20px_rgba(4,120,87,0.35)] border border-emerald-600/20 active:brightness-95 relative overflow-hidden before:absolute before:inset-0 before:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.12),transparent_60%)]',
   danger:
-    'bg-gradient-to-tr from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white shadow-[0_4px_24px_rgba(159,12,57,0.45)] border border-brand-400/30 active:brightness-95 backdrop-blur-md relative overflow-hidden before:absolute before:inset-0 before:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.15),transparent_60%)]',
+    'bg-gradient-to-tr from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white shadow-[0_4px_24px_rgba(239,68,68,0.45)] border border-brand-400/30 active:brightness-95 backdrop-blur-md relative overflow-hidden before:absolute before:inset-0 before:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.15),transparent_60%)]',
 };
 
 const SIZES = {

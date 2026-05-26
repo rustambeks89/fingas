@@ -270,7 +270,7 @@ export default function OwnerDashboard() {
       </div>
 
       {/* REVENUE TREND - Spectacular brand visual dashboard card */}
-      <Card className="rounded-3xl border border-brand-500/20 bg-gradient-to-br from-brand-50/70 via-bg-card/95 to-brand-100/30 p-5 relative overflow-hidden backdrop-blur-2xl shadow-card transition-all duration-350 hover:shadow-md dark:border-brand-500/40 dark:from-brand-600/20 dark:via-bg-card/95 dark:to-brand-700/10 dark:shadow-card-premium dark:hover:shadow-[0_24px_50px_-12px_rgba(159,18,57,0.35)]">
+      <Card className="rounded-3xl border border-brand-500/20 bg-gradient-to-br from-brand-50/70 via-bg-card/95 to-brand-100/30 p-5 relative overflow-hidden backdrop-blur-2xl shadow-card transition-all duration-350 hover:shadow-md dark:border-brand-500/40 dark:from-brand-600/20 dark:via-bg-card/95 dark:to-brand-700/10 dark:shadow-card-premium dark:hover:shadow-[0_24px_50px_-12px_rgba(239, 68, 68, 0.35)]">
         {/* Glowing backdrop ambient orb */}
         <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full bg-brand-500/15 blur-3xl pointer-events-none animate-pulse" />
 

@@ -147,16 +147,25 @@ export default function SalesScreen() {
     setErr('');
     try {
       const { from, to } = rangeFor(period);
-      const [current, archived] = await Promise.all([
-        getCurrentSalesShift({ stationId }).catch(() => null),
+      const [currentSettled, archivedSettled] = await Promise.allSettled([
+        getCurrentSalesShift({ stationId }),
         listSalesShiftGroups({
           stationId,
           from: from.toISOString(),
           to: to.toISOString(),
           limit: 1000,
           includeCurrent: false,
-        }).catch(() => []),
+        }),
       ]);
+      const current = currentSettled.status === 'fulfilled' ? currentSettled.value : null;
+      const archived = archivedSettled.status === 'fulfilled' ? archivedSettled.value : [];
+      if (archivedSettled.status === 'rejected') {
+        const e = archivedSettled.reason;
+        console.error('[SalesScreen] archive load failed:', e);
+        setErr(`Архив: ${e?.message ?? e?.code ?? 'unknown error'}`);
+      } else if (currentSettled.status === 'rejected') {
+        console.warn('[SalesScreen] current shift load failed:', currentSettled.reason);
+      }
 
       const visibleCurrent = current && isInRange(current, from, to) ? current : null;
       const currentKeys = new Set(visibleCurrent?.mergedKeys ?? [visibleCurrent?.shiftKey].filter(Boolean));
@@ -358,7 +367,7 @@ function LiveSalesCard({ shift }) {
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-3xl border border-brand-500/20 bg-gradient-to-br from-brand-50/70 via-bg-card/95 to-brand-100/30 p-5 relative overflow-hidden backdrop-blur-2xl shadow-card transition-all duration-350 hover:shadow-md dark:border-brand-500/40 dark:from-brand-600/20 dark:via-bg-card/95 dark:to-brand-700/10 dark:shadow-card-premium dark:hover:shadow-[0_24px_50px_-12px_rgba(159,18,57,0.3)]"
+      className="rounded-3xl border border-brand-500/20 bg-gradient-to-br from-brand-50/70 via-bg-card/95 to-brand-100/30 p-5 relative overflow-hidden backdrop-blur-2xl shadow-card transition-all duration-350 hover:shadow-md dark:border-brand-500/40 dark:from-brand-600/20 dark:via-bg-card/95 dark:to-brand-700/10 dark:shadow-card-premium dark:hover:shadow-[0_24px_50px_-12px_rgba(239, 68, 68, 0.3)]"
     >
       {/* Dynamic ambient lights */}
       <div className="absolute -top-24 -left-24 w-48 h-48 rounded-full bg-brand-500/15 blur-3xl pointer-events-none animate-pulse" />
