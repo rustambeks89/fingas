@@ -194,14 +194,36 @@ export async function aggregateByShift({ stationId, from, to, limit = 20 } = {})
 }
 
 // Daily timeseries [{day:'YYYY-MM-DD', label, revenue, liters, count}].
+// TransactionDatetime приходит из БД в UTC ("...+00"). Чтобы группировать
+// по локальному дню/месяцу (так привычно пользователю), парсим в Date и
+// берём local-год/месяц/число — иначе ночные транзакции (UTC < 06:00 для
+// UTC+6) попадают в предыдущий день.
+function localYMD(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function localYM(value) {
+  const ymd = localYMD(value);
+  return ymd ? ymd.slice(0, 7) : null;
+}
+
 export async function aggregateByDay({ stationId, from, to } = {}) {
-  const rows = await listSales({ stationId, from, to, limit: 50000 });
+  const rows = await listSales({
+    stationId, from, to, limit: 50000,
+    columns: 'TransactionDatetime, ShopCost, Volume',
+  });
   const map = new Map();
   for (const r of rows) {
-    const dt = String(r.TransactionDatetime ?? '').slice(0, 10);
+    const dt = localYMD(r.TransactionDatetime);
     if (!dt) continue;
     if (!map.has(dt)) {
-      const d = new Date(dt);
+      const d = new Date(`${dt}T00:00:00`);
       map.set(dt, {
         day: dt,
         label: d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' }),
@@ -212,6 +234,36 @@ export async function aggregateByDay({ stationId, from, to } = {}) {
       });
     }
     const g = map.get(dt);
+    g.revenue += Number(r.ShopCost ?? 0);
+    g.liters += Number(r.Volume ?? 0);
+    g.count += 1;
+  }
+  return [...map.values()].sort((a, b) => a.day.localeCompare(b.day));
+}
+
+// Группировка по месяцам — для длинных периодов (год) чтобы график не
+// превращался в кашу из 365 точек и не требовал миллион строк продаж.
+export async function aggregateByMonth({ stationId, from, to } = {}) {
+  const rows = await listSales({
+    stationId, from, to, limit: 200000,
+    columns: 'TransactionDatetime, ShopCost, Volume',
+  });
+  const map = new Map();
+  for (const r of rows) {
+    const ym = localYM(r.TransactionDatetime);
+    if (!ym) continue;
+    if (!map.has(ym)) {
+      const d = new Date(`${ym}-01T00:00:00`);
+      map.set(ym, {
+        day: `${ym}-01`,
+        label: d.toLocaleDateString('ru-RU', { month: 'short', year: '2-digit' }),
+        weekday: '',
+        revenue: 0,
+        liters: 0,
+        count: 0,
+      });
+    }
+    const g = map.get(ym);
     g.revenue += Number(r.ShopCost ?? 0);
     g.liters += Number(r.Volume ?? 0);
     g.count += 1;

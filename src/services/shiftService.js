@@ -32,24 +32,15 @@ import { aggregateByShift, listSales } from './salesService';
 //
 // Date/time and operator name come from azs_selling joined by ShiftKey.
 //
-// Split shifts: one physical shift may be broken into several ShiftKeys (power
-// outage, operator re-login, restart). We merge into a single "shiftGroup" when:
-//   - same shop_key
-//   - same operator_final_name
-//   - start of the next shift is within MERGE_GAP_MINUTES of the prev end
-//     (короткая щель = случайное закрытие+открытие; обычные смены идут
-//     ~24 ч и не должны клеиться только потому что один и тот же оператор)
-//   - OR the shifts overlap.
+// Каждая ShiftKey из POS = одна смена в UI. Раньше пробовали склеивать
+// «осколочные» смены того же оператора в коротком окне, но это путало
+// больше чем помогало — теперь не объединяем ничего.
 //
 // Operator override: lookup public.shift_operator_overrides on (org, shop, shift_key).
 // operator_final_name = operator_corrected_name || operator_original_name.
 
 const COUNTER_FLOOR = 1_000_000;
 const SHIFT_HISTORY_FLOOR = 631;
-// 15 мин — реалистичный потолок для «ошибочно закрыл и сразу открыл».
-// Всё что больше — это уже отдельные смены, даже если оператор тот же.
-const MERGE_GAP_MINUTES = 15;
-const MERGE_GAP_MS = MERGE_GAP_MINUTES * 60 * 1000;
 const SHIFT_KEY_CHUNK = 200;
 
 async function resolveShopKey(stationId) {
@@ -370,71 +361,90 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
     });
   }
 
-  // 6. Merge split shifts. Sort chronologically (использует syncedAt как fallback
-  // для смен без selling-данных).
-  const sortKey = (s) => {
-    const v = s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt;
-    return v ? new Date(v).getTime() : 0;
-  };
-  combined.sort((a, b) => sortKey(a) - sortKey(b));
-
-  const merged = [];
-  for (const s of combined) {
-    const last = merged[merged.length - 1];
-    if (last && canMerge(last, s)) {
-      // merge s into last
-      last.liters  += s.liters;
-      last.revenue += s.revenue;
-      last.count   += s.count;
-      last.parts   += 1;
-      last.mergedKeys.push(s.shiftKey);
-      if (s.firstAt && (!last.firstAt || s.firstAt < last.firstAt)) last.firstAt = s.firstAt;
-      if (s.lastAt  && (!last.lastAt  || s.lastAt  > last.lastAt))  last.lastAt  = s.lastAt;
-      if (s.balanceAt && (!last.balanceAt || s.balanceAt < last.balanceAt)) last.balanceAt = s.balanceAt;
-      for (const [fuel, v] of Object.entries(s.fuels)) {
-        if (!last.fuels[fuel]) last.fuels[fuel] = { liters: 0, revenue: 0 };
-        last.fuels[fuel].liters  += v.liters;
-        last.fuels[fuel].revenue += v.revenue;
-      }
-      // keep last.operatorFinal (already same per canMerge check)
-      // keep the earliest shiftKey as the primary key
-      if (s.shiftKey < last.shiftKey) last.shiftKey = s.shiftKey;
-    } else {
-      merged.push({ ...s });
-    }
-  }
-
-  // newest first for UI — берём lastAt, при отсутствии — syncedAt из balance.
+  // 6. БЕЗ объединения. Раньше склеивали смены того же оператора в коротком
+  // окне (ошибочное закрытие+открытие), но это приводило к путанице — теперь
+  // каждая ShiftKey показывается отдельной строкой как есть в POS.
+  // newest first.
   const newestKey = (s) => {
     const v = s.lastAt ?? s.firstAt ?? s.balanceAt ?? s.syncedAt;
     return v ? new Date(v).getTime() : 0;
   };
-  merged.sort((a, b) => newestKey(b) - newestKey(a));
+  combined.sort((a, b) => newestKey(b) - newestKey(a));
 
-  return merged.slice(0, limit);
-}
-
-function canMerge(a, b) {
-  if (a.shopKey !== b.shopKey) return false;
-  if (!a.hasSellingTime || !b.hasSellingTime) return false;
-  if (!a.operatorOriginal || !b.operatorOriginal) return false;
-  if ((a.operatorFinal ?? '') !== (b.operatorFinal ?? '')) return false;
-  // overlap?
-  if (a.firstAt && b.firstAt && a.lastAt && b.lastAt) {
-    const aEnd   = new Date(a.lastAt).getTime();
-    const bStart = new Date(b.firstAt).getTime();
-    if (bStart <= aEnd) return true;            // overlap or touching
-    if (bStart - aEnd <= MERGE_GAP_MS) return true;
-    return false;
-  }
-  // no time info: only merge if calendar date matches via syncedAt
-  return false;
+  return combined.slice(0, limit);
 }
 
 // Currently-active shift comes from azs_selling: azs_balance is archive/close
 // data and can lag until the POS shift is finalized.
 export async function getCurrentShiftFromBalance({ stationId } = {}) {
   return getCurrentSalesShift({ stationId });
+}
+
+// =============================================================================
+// Aggregations FROM azs_balance (authoritative source for revenue/liters).
+// Каждая смена даёт (EndBalance−BeginBalance)×EndPrice по каждой марке топлива.
+// Дата атрибуции — DatetimeShiftBegin (из azs_shift), а не synced_at.
+// =============================================================================
+
+function localYMD(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export async function aggregateBalanceByDay({ stationId, from, to } = {}) {
+  const shifts = await listShiftsFromBalance({ stationId, from, to, limit: 5000 });
+  const map = new Map();
+  for (const s of shifts) {
+    const day = localYMD(s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt);
+    if (!day) continue;
+    if (!map.has(day)) {
+      const d = new Date(`${day}T00:00:00`);
+      map.set(day, {
+        day,
+        label: d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' }),
+        weekday: d.toLocaleDateString('ru-RU', { weekday: 'short' }),
+        revenue: 0,
+        liters: 0,
+        count: 0,
+      });
+    }
+    const g = map.get(day);
+    g.revenue += Number(s.revenue ?? 0);
+    g.liters  += Number(s.liters ?? 0);
+    g.count   += Number(s.count ?? 0);
+  }
+  return [...map.values()].sort((a, b) => a.day.localeCompare(b.day));
+}
+
+export async function aggregateBalanceByMonth({ stationId, from, to } = {}) {
+  const shifts = await listShiftsFromBalance({ stationId, from, to, limit: 10000 });
+  const map = new Map();
+  for (const s of shifts) {
+    const ymd = localYMD(s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt);
+    if (!ymd) continue;
+    const ym = ymd.slice(0, 7);
+    if (!map.has(ym)) {
+      const d = new Date(`${ym}-01T00:00:00`);
+      map.set(ym, {
+        day: `${ym}-01`,
+        label: d.toLocaleDateString('ru-RU', { month: 'short', year: '2-digit' }),
+        weekday: '',
+        revenue: 0,
+        liters: 0,
+        count: 0,
+      });
+    }
+    const g = map.get(ym);
+    g.revenue += Number(s.revenue ?? 0);
+    g.liters  += Number(s.liters ?? 0);
+    g.count   += Number(s.count ?? 0);
+  }
+  return [...map.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 // Upsert (org, shop_key, shift_key) → operator_corrected_name.

@@ -41,23 +41,29 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { TankCard, TankCardSkeleton } from '@/components/charts/TankCard';
 import {
-  aggregateByDay,
   compareWindows,
   computeFifoCost,
 } from '@/services/salesService';
 import { getTankStatusesWithBalance } from '@/services/tankService';
 import { listEmployees } from '@/services/profileService';
-import { listPendingShiftReports } from '@/services/shiftService';
+import {
+  aggregateBalanceByDay,
+  aggregateBalanceByMonth,
+  listPendingShiftReports,
+} from '@/services/shiftService';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { formatMoney, formatLiters } from '@/lib/formatters';
 import { PROFILE_STATUS, ROLE_LABELS } from '@/lib/constants';
 
+// Периоды для финансового отчёта/графика. Границы — реальные («с 1-го числа»,
+// «с 1 января»), не «последние N дней», иначе «Месяц» показывает 30 дней
+// поперёк двух месяцев, что путает.
 const PERIODS = [
-  { id: 'day',   label: 'День',    days: 1   },
-  { id: 'week',  label: 'Неделя',  days: 7   },
-  { id: 'month', label: 'Месяц',   days: 30  },
-  { id: 'year',  label: 'Год',     days: 365 },
+  { id: 'day',   label: 'День'   },
+  { id: 'week',  label: 'Неделя' },
+  { id: 'month', label: 'Месяц'  },
+  { id: 'year',  label: 'Год'    },
 ];
 
 const REPORTS = [
@@ -76,10 +82,27 @@ const TANK_STATUS_META = {
   unknown: { label: 'нет замера', tone: 'default' },
 };
 
-function rangeFor(daysBack) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const to = new Date();
-  const from = new Date(today.getTime() - (daysBack - 1) * 86400000);
+// Реальные границы периода:
+//   day   — сегодня с 00:00 до сейчас
+//   week  — текущая неделя с понедельника 00:00 до сейчас
+//   month — с 1-го числа текущего месяца до сейчас
+//   year  — с 1 января текущего года до сейчас
+function rangeFor(period) {
+  const now = new Date();
+  const to = new Date(now);
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  let from;
+  if (period === 'day') {
+    from = today;
+  } else if (period === 'week') {
+    // Пн = 1, Вс = 0 → сдвиг до понедельника.
+    const offsetToMonday = (today.getDay() + 6) % 7;
+    from = new Date(today.getTime() - offsetToMonday * 86400000);
+  } else if (period === 'month') {
+    from = new Date(today.getFullYear(), today.getMonth(), 1);
+  } else { // year
+    from = new Date(today.getFullYear(), 0, 1);
+  }
   return { from, to };
 }
 
@@ -108,8 +131,7 @@ export default function OwnerDashboard() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const days = PERIODS.find((p) => p.id === period)?.days ?? 7;
-      const { from, to } = rangeFor(days);
+      const { from, to } = rangeFor(period);
       const fromISO = from.toISOString();
       const toISO = to.toISOString();
       const fromDate = from.toISOString().slice(0, 10);
@@ -119,6 +141,11 @@ export default function OwnerDashboard() {
       const yesterday = startOfDay(new Date(today.getTime() - 86400000));
       const yesterdayEnd = endOfDay(yesterday);
 
+      // На годе график должен быть помесячный — 12 точек, а не 365.
+      // Тренд и итоги — из azs_balance (это правда от ТРК: счётчик×цена).
+      // azs_selling используется только для счётчика чеков в архиве смен.
+      const trendLoader = period === 'year' ? aggregateBalanceByMonth : aggregateBalanceByDay;
+
       const [cmp, daily, fifo, pendingShifts, requests, { data: collRows }, stationRow] = await Promise.all([
         compareWindows({
           currentFrom: today.toISOString(),
@@ -126,7 +153,7 @@ export default function OwnerDashboard() {
           priorFrom: yesterday.toISOString(),
           priorTo: yesterdayEnd.toISOString(),
         }).catch(() => null),
-        aggregateByDay({ from: fromISO, to: toISO }).catch(() => []),
+        trendLoader({ from: fromISO, to: toISO }).catch(() => []),
         computeFifoCost({ from: fromDate, to: toDate }).catch(() => ({ total: 0 })),
         listPendingShiftReports({}).catch(() => []),
         listEmployees({ organizationId: orgId, status: PROFILE_STATUS.PENDING }).catch(() => []),

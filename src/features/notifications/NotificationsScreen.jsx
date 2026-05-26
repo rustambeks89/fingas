@@ -109,6 +109,13 @@ export default function NotificationsScreen() {
     }
   }
 
+  // Свайп вверх по карточке = убрать из списка (пометить прочитанным).
+  function handleSwipeUp(id, _, info) {
+    if (info.offset.y < -80 || info.velocity.y < -500) {
+      markAsRead(id);
+    }
+  }
+
   const visibleRows = useMemo(() => rows.filter((n) => !n.is_read), [rows]);
   const unread = visibleRows.length;
 
@@ -176,8 +183,15 @@ export default function NotificationsScreen() {
               key={n.id}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -120, transition: { duration: 0.18 } }}
               transition={{ delay: i * 0.02 }}
+              drag="y"
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0.5, bottom: 0 }}
+              dragMomentum={false}
+              onDragEnd={(e, info) => handleSwipeUp(n.id, e, info)}
               onClick={() => markAsRead(n.id)}
+              className="touch-pan-y cursor-grab active:cursor-grabbing"
             >
               {hasLink ? (
                 <Wrap to={n.link}>
