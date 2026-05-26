@@ -51,7 +51,6 @@ const SHIFT_HISTORY_FLOOR = 631;
 const MERGE_GAP_MINUTES = 15;
 const MERGE_GAP_MS = MERGE_GAP_MINUTES * 60 * 1000;
 const SHIFT_KEY_CHUNK = 200;
-const SELLING_META_PAGE = 5000;
 
 async function resolveShopKey(stationId) {
   if (!stationId) return null;
@@ -197,53 +196,41 @@ async function loadAzsShiftMetaByShiftKeys({ shopKey, shiftKeys }) {
   return meta;
 }
 
-async function loadSellingMetaByShiftKeys({ shopKey, shiftKeys }) {
-  const meta = new Map();
+// Время/оператор/чеки берём из azs_shift (одна строка на смену), а selling
+// нужен только для счётчика транзакций. Поэтому здесь просим Postgres
+// сгруппировать одним запросом — никаких пагинаций по 5000 строк на чанк.
+async function loadSellingCountByShiftKeys({ shopKey, shiftKeys }) {
+  const counts = new Map();
   const keys = [...new Set(shiftKeys.filter((key) => key != null))];
+  if (keys.length === 0) return counts;
 
   for (let i = 0; i < keys.length; i += SHIFT_KEY_CHUNK) {
     const chunk = keys.slice(i, i + SHIFT_KEY_CHUNK);
-    for (let offset = 0; ; offset += SELLING_META_PAGE) {
-      let q = supabase
-        .from('azs_selling')
-        .select('ShiftKey, ShopKey, TransactionDatetime, OperatorName')
-        .in('ShiftKey', chunk)
-        .order('TransactionDatetime', { ascending: true })
-        .range(offset, offset + SELLING_META_PAGE - 1);
-      if (shopKey != null) q = q.eq('ShopKey', shopKey);
+    // По одной короткой выборке на чанк, без paging.
+    // OperatorName используется как fallback если azs_shift не отдал имя.
+    let q = supabase
+      .from('azs_selling')
+      .select('ShiftKey, OperatorName')
+      .in('ShiftKey', chunk)
+      .limit(100000);
+    if (shopKey != null) q = q.eq('ShopKey', shopKey);
 
-      const { data, error } = await q;
-      if (error) throw error;
+    const { data, error } = await q;
+    if (error) throw error;
 
-      for (const r of data ?? []) {
-        const key = r.ShiftKey;
-        if (key == null) continue;
-        if (!meta.has(key)) {
-          meta.set(key, {
-            shiftKey: key,
-            shopKey: r.ShopKey,
-            operator: r.OperatorName ?? '—',
-            firstAt: r.TransactionDatetime,
-            lastAt: r.TransactionDatetime,
-            count: 0,
-          });
-        }
-        const g = meta.get(key);
-        g.count += 1;
-        if (r.OperatorName && r.OperatorName !== '—') g.operator = r.OperatorName;
-        if (r.TransactionDatetime && (!g.firstAt || r.TransactionDatetime < g.firstAt)) {
-          g.firstAt = r.TransactionDatetime;
-        }
-        if (r.TransactionDatetime && (!g.lastAt || r.TransactionDatetime > g.lastAt)) {
-          g.lastAt = r.TransactionDatetime;
-        }
+    for (const r of data ?? []) {
+      const key = r.ShiftKey;
+      if (key == null) continue;
+      if (!counts.has(key)) counts.set(key, { count: 0, operator: null });
+      const g = counts.get(key);
+      g.count += 1;
+      if (!g.operator && r.OperatorName && r.OperatorName !== '—') {
+        g.operator = r.OperatorName;
       }
-
-      if (!data || data.length < SELLING_META_PAGE) break;
     }
   }
 
-  return meta;
+  return counts;
 }
 
 // List per-(ShiftKey, FuelName) aggregated rows from azs_balance, plus the
@@ -256,10 +243,11 @@ async function loadSellingMetaByShiftKeys({ shopKey, shiftKeys }) {
 export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } = {}) {
   const shopKey = await resolveShopKey(stationId);
 
-  // 1. Raw azs_balance — only counter rows above the floor.
+  // 1. Raw azs_balance — только нужные колонки (раньше был select('*')
+  // и тянули десятки полей зря). Только counter-строки выше floor.
   let balQ = supabase
     .from('azs_balance')
-    .select('*')
+    .select('ShiftKey, ShopKey, FuelName, BeginBalance, EndBalance, EndPrice, synced_at')
     .gt('BeginBalance', COUNTER_FLOOR)
     .gt('EndBalance',   COUNTER_FLOOR)
     .gte('ShiftKey', SHIFT_HISTORY_FLOOR)
@@ -310,28 +298,19 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
   const keys = [...shifts.keys()];
   if (keys.length === 0) return [];
 
-  // Selling-мета не должна валить весь архив. Если запрос упадёт (RLS,
-  // лимиты, сеть) — покажем смены без чеков, а ошибку выведем в консоль
-  // чтобы можно было диагностировать.
-  const [shiftByKey, sellingByKey] = await Promise.all([
+  // azs_shift = авторитетные даты/оператор. azs_selling нужен только
+  // для счётчика чеков (и операторa-фолбэка). Оба не должны валить весь
+  // архив — на ошибке покажем то что есть.
+  const [shiftByKey, sellingCounts] = await Promise.all([
     loadAzsShiftMetaByShiftKeys({ shopKey, shiftKeys: keys }).catch((e) => {
       console.warn('[shiftService] azs_shift meta failed:', e?.message ?? e);
       return new Map();
     }),
-    loadSellingMetaByShiftKeys({ shopKey, shiftKeys: keys }).catch((e) => {
-      console.warn('[shiftService] azs_selling meta failed:', e?.message ?? e);
+    loadSellingCountByShiftKeys({ shopKey, shiftKeys: keys }).catch((e) => {
+      console.warn('[shiftService] azs_selling count failed:', e?.message ?? e);
       return new Map();
     }),
   ]);
-  console.info('[shiftService] keys:', keys.length, '| shift-meta:', shiftByKey.size, '| selling-meta:', sellingByKey.size);
-  if (shiftByKey.size > 0) {
-    const sample = [...shiftByKey.entries()][0];
-    console.info('[shiftService] sample shift meta:', sample[0], sample[1]);
-  }
-  if (sellingByKey.size > 0) {
-    const sample = [...sellingByKey.entries()][0];
-    console.info('[shiftService] sample selling meta:', sample[0], sample[1]);
-  }
 
   // 4. Pull overrides for these shifts
   const { data: overrides } = await supabase
@@ -349,11 +328,11 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
   // syncedAt в UTC даёт −6ч после parsePosDate).
   let combined = keys.map((k) => {
     const g = shifts.get(k);
-    const s = sellingByKey.get(k);
+    const c = sellingCounts.get(k);
     const h = shiftByKey.get(k);
     // Оператор: приоритет azs_shift (авторитетная карточка смены), затем
     // azs_selling (по транзакциям), затем override от админа.
-    const operatorOriginal = h?.operator ?? s?.operator ?? null;
+    const operatorOriginal = h?.operator ?? c?.operator ?? null;
     const operatorOverride = overrideMap.get(`${g.shopKey}:${k}`) ?? null;
     const operatorFinal = operatorOverride && operatorOverride.trim() ? operatorOverride : (operatorOriginal ?? '—');
     return {
@@ -362,14 +341,14 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
       operatorOriginal,
       operatorOverride,
       operatorFinal,
-      firstAt: h?.firstAt ?? s?.firstAt ?? null,
-      lastAt:  h?.lastAt  ?? s?.lastAt  ?? null,
+      firstAt: h?.firstAt ?? null,
+      lastAt:  h?.lastAt  ?? null,
       balanceAt: g.balanceAt ?? null,
       syncedAt: g.syncedAt ?? null,
-      hasSellingTime: Boolean(h?.firstAt || h?.lastAt || s?.firstAt || s?.lastAt),
+      hasSellingTime: Boolean(h?.firstAt || h?.lastAt),
       liters: g.liters,
       revenue: g.revenue,
-      count: s?.count ?? 0,
+      count: c?.count ?? 0,
       fuels: g.fuels,
       parts: 1,
       mergedKeys: [k],
