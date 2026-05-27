@@ -62,7 +62,20 @@ export async function getThreads() {
     .order('created_at', { ascending: false });
 
   if (error) throw error;
-  return enrichThreads(threads ?? []);
+
+  // Фильтруем диалоги, скрытые пользователем для себя
+  const visibleThreads = (threads ?? []).filter((t) => {
+    const me = t.participants?.find((p) => p.user_id === userId);
+    if (!me?.hidden_at) return true;
+    
+    // Личные чаты скрываем полностью, групповые/общие оставляем в списке, но с очищенной историей
+    if (t.type !== 'direct') return true;
+    
+    const lastActive = t.last_message_at || t.created_at;
+    return new Date(lastActive) > new Date(me.hidden_at);
+  });
+
+  return enrichThreads(visibleThreads);
 }
 
 // 2. Fetch specific thread by ID
@@ -83,15 +96,33 @@ export async function getThreadById(threadId) {
 
 // 3. Fetch all messages in a thread
 export async function getMessages(threadId) {
-  const { data: messages, error } = await supabase
+  const userId = await getUserId();
+  if (!userId) return [];
+
+  // Get the participant record for this user in this thread to check hidden_at
+  const { data: partData } = await supabase
+    .from('chat_participants')
+    .select('hidden_at')
+    .eq('thread_id', threadId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const hiddenAt = partData?.hidden_at;
+
+  let query = supabase
     .from('chat_messages')
     .select(`
       *,
       sender:profiles ( id, full_name, avatar_url, role ),
       attachments:chat_attachments ( * )
     `)
-    .eq('thread_id', threadId)
-    .order('created_at', { ascending: true });
+    .eq('thread_id', threadId);
+
+  if (hiddenAt) {
+    query = query.gt('created_at', hiddenAt);
+  }
+
+  const { data: messages, error } = await query.order('created_at', { ascending: true });
 
   if (error) throw error;
   return messages ?? [];
@@ -100,33 +131,55 @@ export async function getMessages(threadId) {
 // 4. Create or find direct thread between current user and target user
 export async function createDirectThread(targetUserId) {
   const userId = await getUserId();
-  if (!userId) throw new Error('Not authenticated');
+  if (!userId) throw new Error('Не авторизован');
+  if (!targetUserId) throw new Error('Не указан пользователь');
+  if (userId === targetUserId) throw new Error('Нельзя создать чат с самим собой');
 
   // Fetch current user organization details
-  const { data: myProfile } = await supabase
+  const { data: myProfile, error: profileError } = await supabase
     .from('profiles')
     .select('organization_id')
     .eq('user_id', userId)
     .single();
 
+  if (profileError) throw profileError;
   const orgId = myProfile?.organization_id;
-  if (!orgId) throw new Error('No active organization found');
+  if (!orgId) throw new Error('Организация не найдена');
 
-  // Check if thread already exists
-  const { data: myThreads } = await supabase
-    .from('chat_threads')
-    .select('id, type, participants:chat_participants(user_id)')
-    .eq('organization_id', orgId)
-    .eq('type', 'direct');
+  // Надёжный поиск существующего direct-треда: находим треды где участник — я,
+  // потом среди них ищем треды где участник — targetUser.
+  // Это RLS-безопасно т.к. запрашиваем chat_participants напрямую.
+  const { data: myParts, error: myPartsError } = await supabase
+    .from('chat_participants')
+    .select('thread_id, thread:chat_threads(id, type, organization_id, archived)')
+    .eq('user_id', userId);
 
-  const existing = myThreads?.find(t => 
-    t.participants?.some(p => p.user_id === targetUserId) &&
-    t.participants?.some(p => p.user_id === userId)
-  );
+  if (myPartsError) throw myPartsError;
 
-  if (existing) return existing.id;
+  // Фильтруем: только active direct-треды нашей организации
+  const myDirectThreadIds = (myParts ?? [])
+    .filter((p) =>
+      p.thread?.type === 'direct' &&
+      p.thread?.organization_id === orgId &&
+      !p.thread?.archived
+    )
+    .map((p) => p.thread_id);
 
-  // Create new direct thread
+  if (myDirectThreadIds.length > 0) {
+    // Проверяем: есть ли targetUser в одном из этих тредов
+    const { data: targetParts } = await supabase
+      .from('chat_participants')
+      .select('thread_id')
+      .eq('user_id', targetUserId)
+      .in('thread_id', myDirectThreadIds);
+
+    if (targetParts && targetParts.length > 0) {
+      // Тред уже существует — возвращаем первый найденный
+      return targetParts[0].thread_id;
+    }
+  }
+
+  // Создаём новый direct тред
   const { data: thread, error: threadError } = await supabase
     .from('chat_threads')
     .insert({
@@ -139,22 +192,26 @@ export async function createDirectThread(targetUserId) {
 
   if (threadError) throw threadError;
 
-  // Add participants
+  // Добавляем участников через upsert чтобы не упасть при дублировании
   const { error: partError } = await supabase
     .from('chat_participants')
-    .insert([
-      { thread_id: thread.id, user_id: userId },
-      { thread_id: thread.id, user_id: targetUserId },
-    ]);
+    .upsert(
+      [
+        { thread_id: thread.id, user_id: userId },
+        { thread_id: thread.id, user_id: targetUserId },
+      ],
+      { onConflict: 'thread_id,user_id', ignoreDuplicates: true }
+    );
 
   if (partError) {
-    // Cleanup thread if participants failed
+    // Откатываем тред если участников добавить не удалось
     await supabase.from('chat_threads').delete().eq('id', thread.id);
     throw partError;
   }
 
   return thread.id;
 }
+
 
 // 5. Create or find station thread
 export async function createStationThread(stationId) {
@@ -262,8 +319,14 @@ export async function sendMessage(threadId, messageText, type = 'text', related 
   const userId = await getUserId();
   if (!userId) throw new Error('Not authenticated');
 
-  // Fetch thread details to fill organization_id and station_id
-  const thread = await getThreadById(threadId);
+  // Оптимизированный запрос: берем только нужные ID без тяжелых джойнов и профилей
+  const { data: thread, error: threadError } = await supabase
+    .from('chat_threads')
+    .select('organization_id, station_id')
+    .eq('id', threadId)
+    .single();
+
+  if (threadError) throw threadError;
 
   const { data, error } = await supabase
     .from('chat_messages')
@@ -289,7 +352,14 @@ export async function sendAttachment(threadId, file) {
   const userId = await getUserId();
   if (!userId) throw new Error('Not authenticated');
 
-  const thread = await getThreadById(threadId);
+  // Оптимизированный запрос: берем только нужные ID без тяжелых джойнов и профилей
+  const { data: thread, error: threadError } = await supabase
+    .from('chat_threads')
+    .select('organization_id, station_id')
+    .eq('id', threadId)
+    .single();
+
+  if (threadError) throw threadError;
 
   // Upload file to Supabase Storage Bucket
   const fileExt = file.name.split('.').pop();
@@ -341,12 +411,17 @@ export async function markThreadAsRead(threadId) {
   const userId = await getUserId();
   if (!userId) return;
 
-  // Update participant joined/read timestamp
+  // Upsert participant joined/read timestamp to ensure row exists
   await supabase
     .from('chat_participants')
-    .update({ last_read_at: new Date().toISOString() })
-    .eq('thread_id', threadId)
-    .eq('user_id', userId);
+    .upsert(
+      {
+        thread_id: threadId,
+        user_id: userId,
+        last_read_at: new Date().toISOString(),
+      },
+      { onConflict: 'thread_id,user_id' }
+    );
 }
 
 // 10. Fetch unread messages count for active user
@@ -439,4 +514,58 @@ export async function getLatestChatMessage() {
     console.error('[Fingas chatService] Error in getLatestChatMessage', e);
     return null;
   }
+}
+
+// 13. Update/edit an existing chat message (only if unread)
+export async function updateMessage(messageId, newText) {
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .update({
+      message: newText,
+      edited: true,
+      updated_at: new Date(),
+    })
+    .eq('id', messageId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// 14. Delete a chat message (only if unread or by owner)
+export async function deleteMessage(messageId) {
+  const { error } = await supabase
+    .from('chat_messages')
+    .delete()
+    .eq('id', messageId);
+
+  if (error) throw error;
+  return true;
+}
+
+// 15. Hide dialogue for current user (soft-delete for self)
+export async function hideThreadForUser(threadId) {
+  const userId = await getUserId();
+  if (!userId) throw new Error('Не авторизован');
+
+  const { error } = await supabase
+    .from('chat_participants')
+    .update({ hidden_at: new Date() })
+    .eq('thread_id', threadId)
+    .eq('user_id', userId);
+
+  if (error) throw error;
+  return true;
+}
+
+// 16. Archive thread globally (delete for everyone, only owner can do this)
+export async function archiveThreadGlobally(threadId) {
+  const { error } = await supabase
+    .from('chat_threads')
+    .update({ archived: true })
+    .eq('id', threadId);
+
+  if (error) throw error;
+  return true;
 }

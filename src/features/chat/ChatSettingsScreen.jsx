@@ -17,12 +17,14 @@ import {
   User,
   Loader2,
   Shield,
+  Trash2,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/hooks/useAuth';
 import { useOrgContext } from '@/hooks/useOrgContext';
-import { getThreadById } from '@/services/chatService';
+import { getThreadById, hideThreadForUser, archiveThreadGlobally } from '@/services/chatService';
 import { supabase } from '@/lib/supabaseClient';
 import { ROLE_LABELS } from '@/lib/constants';
 
@@ -36,6 +38,31 @@ export default function ChatSettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [myPart, setMyPart] = useState(null);
   const [toggling, setToggling] = useState('');
+  const isOwner = user?.profile?.role === 'owner';
+
+  async function handleHideThread() {
+    setToggling('delete');
+    try {
+      await hideThreadForUser(threadId);
+      navigate('/more/chat', { replace: true });
+    } catch (e) {
+      console.error('[Fingas ChatSettings] Hide thread error', e);
+    } finally {
+      setToggling('');
+    }
+  }
+
+  async function handleArchiveThreadGlobally() {
+    setToggling('delete');
+    try {
+      await archiveThreadGlobally(threadId);
+      navigate('/more/chat', { replace: true });
+    } catch (e) {
+      console.error('[Fingas ChatSettings] Delete thread globally error', e);
+    } finally {
+      setToggling('');
+    }
+  }
 
   useEffect(() => {
     if (!threadId) return;
@@ -259,6 +286,41 @@ export default function ChatSettingsScreen() {
                   </motion.div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Danger Zone (Dialogue deletion) */}
+          <div className="mt-8 pt-6 border-t border-line/40">
+            <div className="text-[10px] font-bold text-danger uppercase tracking-wider px-1 mb-3">
+              Опасная зона
+            </div>
+            
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* For every participant: hide thread for self */}
+              <Button
+                variant="secondary"
+                size="block"
+                onClick={handleHideThread}
+                disabled={toggling === 'delete'}
+                className="flex-1 h-11 text-xs border-danger/30 hover:border-danger/60 text-danger hover:bg-danger/5 transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                Удалить для себя
+              </Button>
+
+              {/* Direct chat participant (except cashier/operator) OR Owner can delete/archive globally */}
+              {(isOwner || (thread?.type === 'direct' && user?.profile?.role !== 'operator')) && (
+                <Button
+                  variant="danger"
+                  size="block"
+                  onClick={handleArchiveThreadGlobally}
+                  disabled={toggling === 'delete'}
+                  className="flex-1 h-11 text-xs shadow-md shadow-brand-500/20"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" />
+                  Удалить для всех
+                </Button>
+              )}
             </div>
           </div>
         </>

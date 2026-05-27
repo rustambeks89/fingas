@@ -10,6 +10,8 @@ import {
   sendMessage,
   sendAttachment,
   markThreadAsRead,
+  updateMessage,
+  deleteMessage,
 } from '@/services/chatService';
 
 export function useChat(threadId = null) {
@@ -63,6 +65,26 @@ export function useChat(threadId = null) {
     if (!threadId || !text?.trim()) return null;
     try {
       const data = await sendMessage(threadId, text, type, related);
+      
+      // Сразу получаем профиль отправителя для мгновенного отображения в интерфейсе
+      const { data: senderProfile } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, role')
+        .eq('user_id', data.sender_id)
+        .single();
+
+      const completeMessage = {
+        ...data,
+        sender: senderProfile ?? null,
+        attachments: [],
+      };
+
+      // Мгновенно добавляем сообщение в список (дедуплицируем на всякий случай)
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === completeMessage.id)) return prev;
+        return [...prev, completeMessage];
+      });
+
       // Mark thread read locally
       await markThreadAsRead(threadId);
       return data;
@@ -87,6 +109,34 @@ export function useChat(threadId = null) {
     }
   }, [threadId]);
 
+  // 4.1 Edit text message
+  const editTextMessage = useCallback(async (messageId, newText) => {
+    try {
+      const data = await updateMessage(messageId, newText);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, ...data } : m))
+      );
+      return data;
+    } catch (e) {
+      console.error('[Fingas useChat] Edit text error', e);
+      setError(e?.message ?? 'Ошибка изменения сообщения.');
+      throw e;
+    }
+  }, []);
+
+  // 4.2 Delete message
+  const deleteTextMessage = useCallback(async (messageId) => {
+    try {
+      await deleteMessage(messageId);
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      return true;
+    } catch (e) {
+      console.error('[Fingas useChat] Delete message error', e);
+      setError(e?.message ?? 'Ошибка удаления сообщения.');
+      throw e;
+    }
+  }, []);
+
   // Initial load
   useEffect(() => {
     loadThreads();
@@ -110,45 +160,55 @@ export function useChat(threadId = null) {
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*', // Слушаем все события (INSERT, UPDATE, DELETE)
           schema: 'public',
           table: 'chat_messages',
           filter: `thread_id=eq.${threadId}`,
         },
         async (payload) => {
-          // Fetch complete profile details of the sender for high-fidelity UI rendering
-          const { data: senderProfile } = await supabase
-            .from('profiles')
-            .select('id, full_name, avatar_url, role')
-            .eq('user_id', payload.new.sender_id)
-            .single();
+          if (payload.eventType === 'INSERT') {
+            // Fetch complete profile details of the sender for high-fidelity UI rendering
+            const { data: senderProfile } = await supabase
+              .from('profiles')
+              .select('id, full_name, avatar_url, role')
+              .eq('user_id', payload.new.sender_id)
+              .single();
 
-          // Fetch attachment if message_type is image/file
-          let fileAttachments = [];
-          if (payload.new.message_type === 'image' || payload.new.message_type === 'file') {
-            const { data } = await supabase
-              .from('chat_attachments')
-              .select('*')
-              .eq('message_id', payload.new.id);
-            fileAttachments = data ?? [];
+            // Fetch attachment if message_type is image/file
+            let fileAttachments = [];
+            if (payload.new.message_type === 'image' || payload.new.message_type === 'file') {
+              const { data } = await supabase
+                .from('chat_attachments')
+                .select('*')
+                .eq('message_id', payload.new.id);
+              fileAttachments = data ?? [];
+            }
+
+            const completeMessage = {
+              ...payload.new,
+              sender: senderProfile ?? null,
+              attachments: fileAttachments,
+            };
+
+            // Append message securely without breaking standard lifecycle lists
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === completeMessage.id)) return prev;
+              return [...prev, completeMessage];
+            });
+
+            // Refresh active threads list so that the latest message timestamp aligns correctly
+            loadThreads();
+            // Mark thread as read for current user since they are inside the screen
+            markThreadAsRead(threadId);
+          } else if (payload.eventType === 'UPDATE') {
+            // Обновляем сообщение в локальном стейте
+            setMessages((prev) =>
+              prev.map((m) => (m.id === payload.new.id ? { ...m, ...payload.new } : m))
+            );
+          } else if (payload.eventType === 'DELETE') {
+            // Удаляем сообщение из локального стейта
+            setMessages((prev) => prev.filter((m) => m.id !== payload.old.id));
           }
-
-          const completeMessage = {
-            ...payload.new,
-            sender: senderProfile ?? null,
-            attachments: fileAttachments,
-          };
-
-          // Append message securely without breaking standard lifecycle lists
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === completeMessage.id)) return prev;
-            return [...prev, completeMessage];
-          });
-
-          // Refresh active threads list so that the latest message timestamp aligns correctly
-          loadThreads();
-          // Mark thread as read for current user since they are inside the screen
-          markThreadAsRead(threadId);
         }
       )
       .subscribe();
@@ -168,5 +228,7 @@ export function useChat(threadId = null) {
     refreshMessages: () => loadMessages(threadId),
     sendTextMessage,
     sendFileAttachment,
+    editMessage: editTextMessage,
+    deleteMessage: deleteTextMessage,
   };
 }

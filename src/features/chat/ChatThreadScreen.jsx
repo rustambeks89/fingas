@@ -8,10 +8,7 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft,
   Send,
-  Paperclip,
-  FileText,
   Clock,
-  ExternalLink,
   Loader2,
   Sparkles,
   Settings,
@@ -30,15 +27,14 @@ export default function ChatThreadScreen() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { stations } = useOrgContext();
-  const { messages, loadingMessages, error, sendTextMessage, sendFileAttachment } = useChat(threadId);
+  const { messages, loadingMessages, error, sendTextMessage, editMessage, deleteMessage } = useChat(threadId);
 
   const [threadMeta, setThreadMeta] = useState(null);
   const [inputText, setInputText] = useState('');
-  const [uploading, setUploading] = useState(false);
   const [localErr, setLocalErr] = useState('');
+  const [editingMessage, setEditingMessage] = useState(null);
 
   const scrollRef = useRef(null);
-  const fileInputRef = useRef(null);
 
   // Load thread meta-details (name, type, etc.)
   useEffect(() => {
@@ -56,6 +52,7 @@ export default function ChatThreadScreen() {
             title: name,
             subtitle: otherPart?.user?.role ? ROLE_LABELS[otherPart.user.role] : 'Личный чат',
             avatar: otherPart?.user?.avatar_url,
+            participants: t.participants,
           });
         } else if (isStation) {
           const matchStation = stations.find((s) => s.id === t.station_id);
@@ -63,18 +60,21 @@ export default function ChatThreadScreen() {
             title: t.title ?? matchStation?.name ?? 'Чат АЗС',
             subtitle: 'Групповой чат АЗС',
             avatar: null,
+            participants: t.participants,
           });
         } else if (isOrg) {
           setThreadMeta({
             title: t.title ?? 'Общий чат компании',
             subtitle: 'Вся организация',
             avatar: null,
+            participants: t.participants,
           });
         } else {
           setThreadMeta({
             title: t.title ?? 'Рабочий диалог',
             subtitle: 'Чат по объекту',
             avatar: null,
+            participants: t.participants,
           });
         }
       })
@@ -92,6 +92,48 @@ export default function ChatThreadScreen() {
     scrollToBottom();
   }, [messages, loadingMessages]);
 
+  // Group messages by day
+  const groupMessagesByDate = (msgList) => {
+    const groups = {};
+    msgList.forEach((m) => {
+      const date = new Date(m.created_at);
+      const dateStr = date.toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+      
+      const today = new Date();
+      const yesterday = new Date();
+      yesterday.setDate(today.getDate() - 1);
+      
+      let label = dateStr;
+      if (date.toDateString() === today.toDateString()) {
+        label = 'Сегодня';
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        label = 'Вчера';
+      }
+      
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(m);
+    });
+    return groups;
+  };
+
+  // Check if message was not read by other participants yet
+  const isMessageUnread = (msg) => {
+    if (!threadMeta?.participants) return false;
+    const otherParts = threadMeta.participants.filter((p) => p.user_id !== user?.id);
+    if (otherParts.length === 0) return false;
+    return otherParts.some((p) => !p.last_read_at || new Date(p.last_read_at) < new Date(msg.created_at));
+  };
+
+  const canEditOrDelete = (msg) => {
+    if (msg.sender_id !== user?.id) return false;
+    if (msg.message_type === 'system') return false;
+    return isMessageUnread(msg);
+  };
+
   // Send Actions
   async function handleSend(e) {
     if (e) e.preventDefault();
@@ -101,29 +143,30 @@ export default function ChatThreadScreen() {
     setInputText('');
     setLocalErr('');
     try {
-      await sendTextMessage(text);
+      if (editingMessage) {
+        await editMessage(editingMessage.id, text);
+        setEditingMessage(null);
+      } else {
+        await sendTextMessage(text);
+      }
       scrollToBottom();
     } catch {
       setInputText(text); // Restore text on fail
-      setLocalErr('Не удалось отправить сообщение.');
+      setLocalErr(editingMessage ? 'Не удалось изменить сообщение.' : 'Не удалось отправить сообщение.');
     }
   }
 
-  async function handleFileSelect(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    setLocalErr('');
+  async function handleDeleteMessage(msgId) {
     try {
-      await sendFileAttachment(file);
-      scrollToBottom();
+      await deleteMessage(msgId);
     } catch {
-      setLocalErr('Ошибка загрузки файла.');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setLocalErr('Не удалось удалить сообщение.');
     }
+  }
+
+  function startEditing(msg) {
+    setEditingMessage(msg);
+    setInputText(msg.message);
   }
 
   return (
@@ -202,92 +245,99 @@ export default function ChatThreadScreen() {
             description="Отправьте первое сообщение, чтобы начать общение с коллегами."
           />
         ) : (
-          messages.map((m) => {
-            const isMe = m.sender_id === user?.id;
-            const isSystem = m.message_type === 'system';
+          Object.entries(groupMessagesByDate(messages)).map(([dateLabel, groupMsgs]) => (
+            <div key={dateLabel} className="space-y-4">
+              <div className="flex justify-center my-4">
+                <span className="bg-bg-soft/80 border border-line/45 rounded-full px-3.5 py-1 text-[10px] font-bold text-ink-soft uppercase tracking-wider font-sans">
+                  {dateLabel}
+                </span>
+              </div>
+              
+              {groupMsgs.map((m) => {
+                const isMe = m.sender_id === user?.id;
+                const isSystem = m.message_type === 'system';
 
-            if (isSystem) {
-              return (
-                <div key={m.id} className="flex justify-center my-2">
-                  <div className="bg-bg-soft/70 border border-line/40 rounded-2xl px-4 py-2 text-center text-xs text-ink-soft max-w-[85%] leading-relaxed flex items-start gap-1.5 font-sans">
-                    <Sparkles className="w-3.5 h-3.5 text-brand-400 mt-0.5 flex-shrink-0" />
-                    <span>{m.message}</span>
-                  </div>
-                </div>
-              );
-            }
+                if (isSystem) {
+                  return (
+                    <div key={m.id} className="flex justify-center my-2">
+                      <div className="bg-bg-soft/70 border border-line/40 rounded-2xl px-4 py-2 text-center text-xs text-ink-soft max-w-[85%] leading-relaxed flex items-start gap-1.5 font-sans">
+                        <Sparkles className="w-3.5 h-3.5 text-brand-400 mt-0.5 flex-shrink-0" />
+                        <span>{m.message}</span>
+                      </div>
+                    </div>
+                  );
+                }
 
-            return (
-              <div key={m.id} className={`flex gap-2.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                {/* Sender Avatar for group chats */}
-                {!isMe && m.sender?.avatar_url && (
-                  <div className="w-8 h-8 rounded-lg overflow-hidden border border-line/40 flex-shrink-0 self-end mb-1">
-                    <img src={m.sender.avatar_url} alt="" className="w-full h-full object-cover" />
-                  </div>
-                )}
+                const editable = canEditOrDelete(m);
 
-                <div className="max-w-[78%] flex flex-col">
-                  {/* Sender Name for group chats */}
-                  {!isMe && m.sender?.full_name && (
-                    <span className="text-[10px] font-bold text-ink-soft mb-1 pl-1 font-display">
-                      {m.sender.full_name} ({ROLE_LABELS[m.sender.role] || m.sender.role})
-                    </span>
-                  )}
-
-                  {/* Message Bubble */}
-                  <div
-                    className={`rounded-[1.5rem] px-4 py-3 text-sm leading-relaxed ${
-                      isMe
-                        ? 'bg-gradient-to-b from-brand-500 to-brand-600 text-white rounded-br-none shadow-[0_4px_16px_-4px_rgba(34,197,94,0.22)] border border-brand-500/20'
-                        : 'bg-bg-card border border-line/45 text-ink rounded-bl-none shadow-card'
-                    }`}
-                  >
-                    {/* Render Image Attachments */}
-                    {m.message_type === 'image' && m.attachments?.[0]?.file_url && (
-                      <div className="mb-2 rounded-xl overflow-hidden border border-line/20 bg-black/10">
-                        <img
-                          src={m.attachments[0].file_url}
-                          alt="Вложение"
-                          className="max-h-60 w-full object-cover"
-                        />
+                return (
+                  <div key={m.id} className={`flex gap-2.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    {/* Sender Avatar for group chats */}
+                    {!isMe && m.sender?.avatar_url && (
+                      <div className="w-8 h-8 rounded-lg overflow-hidden border border-line/40 flex-shrink-0 self-end mb-1">
+                        <img src={m.sender.avatar_url} alt="" className="w-full h-full object-cover" />
                       </div>
                     )}
 
-                    {/* Render File Attachments */}
-                    {m.message_type === 'file' && m.attachments?.[0]?.file_url && (
-                      <a
-                        href={m.attachments[0].file_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mb-2 p-3 rounded-xl border border-line/20 bg-bg-elevated/40 flex items-center justify-between gap-2 text-xs font-semibold text-ink-muted hover:text-ink hover:bg-bg-elevated transition-colors"
+                    <div className="max-w-[78%] flex flex-col">
+                      {/* Sender Name for group chats */}
+                      {!isMe && m.sender?.full_name && (
+                        <span className="text-[10px] font-bold text-ink-soft mb-1 pl-1 font-display">
+                          {m.sender.full_name} ({ROLE_LABELS[m.sender.role] || m.sender.role})
+                        </span>
+                      )}
+
+                      {/* Message Bubble */}
+                      <div
+                        className={`rounded-[1.5rem] px-4 py-3 text-sm leading-relaxed ${
+                          isMe
+                            ? 'bg-gradient-to-b from-brand-500 to-brand-600 text-white rounded-br-none shadow-[0_4px_16px_-4px_rgba(34,197,94,0.22)] border border-brand-500/20'
+                            : 'bg-bg-card border border-line/45 text-ink rounded-bl-none shadow-card'
+                        }`}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <FileText className="w-4 h-4 text-brand-400 flex-shrink-0" />
-                          <span className="truncate">{m.attachments[0].file_name ?? 'Файл'}</span>
+                        <div className="whitespace-pre-wrap break-words font-sans">{m.message}</div>
+
+                        {/* Timestamp inside bubble */}
+                        <div
+                          className={`text-[9px] font-mono mt-1.5 flex items-center justify-end gap-1 ${
+                            isMe ? 'text-white/60' : 'text-ink-soft'
+                          }`}
+                        >
+                          {m.edited && <span className="text-[8px] uppercase tracking-wider opacity-85 mr-1 font-bold">Изменено</span>}
+                          <Clock className="w-2.5 h-2.5" />
+                          {new Date(m.created_at).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </div>
-                        <ExternalLink className="w-3.5 h-3.5 text-ink-soft flex-shrink-0" />
-                      </a>
-                    )}
+                      </div>
 
-                    <div className="whitespace-pre-wrap break-words font-sans">{m.message}</div>
-
-                    {/* Timestamp inside bubble */}
-                    <div
-                      className={`text-[9px] font-mono mt-1.5 flex items-center justify-end gap-1 ${
-                        isMe ? 'text-white/60' : 'text-ink-soft'
-                      }`}
-                    >
-                      <Clock className="w-2.5 h-2.5" />
-                      {new Date(m.created_at).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                      {/* Inline Actions (Edit/Delete) for sent unread messages */}
+                      {editable && (
+                        <div className="flex items-center justify-end gap-3 mt-1.5 px-1.5 text-[10px] font-bold text-brand-500">
+                          <button
+                            type="button"
+                            onClick={() => startEditing(m)}
+                            className="hover:underline cursor-pointer active:scale-95 transition-transform"
+                          >
+                            Изменить
+                          </button>
+                          <span className="text-line/60">•</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMessage(m.id)}
+                            className="text-danger hover:underline cursor-pointer active:scale-95 transition-transform"
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
-              </div>
-            );
-          })
+                );
+              })}
+            </div>
+          ))
         )}
       </main>
 
@@ -299,43 +349,37 @@ export default function ChatThreadScreen() {
           </div>
         )}
 
-        <form onSubmit={handleSend} className="flex items-center gap-2">
-          {/* File attach button */}
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-            className="w-12 h-12 rounded-2xl border border-line/50 bg-bg-card/40 flex items-center justify-center text-ink-muted hover:text-ink active:scale-95 transition-all hover:bg-bg-card/80 disabled:opacity-55"
-            aria-label="Прикрепить файл"
-          >
-            {uploading ? (
-              <Loader2 className="w-5 h-5 text-brand-500 animate-spin" />
-            ) : (
-              <Paperclip className="w-5 h-5" />
-            )}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,application/pdf"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
+        {/* Editing indicator banner */}
+        {editingMessage && (
+          <div className="flex items-center justify-between bg-brand-500/10 border-l-2 border-brand-500 px-3.5 py-2 mb-2 rounded-r-xl text-xs">
+            <span className="text-ink-muted truncate">Редактирование: "{editingMessage.message}"</span>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingMessage(null);
+                setInputText('');
+              }}
+              className="text-brand-500 font-bold hover:underline ml-2"
+            >
+              Отмена
+            </button>
+          </div>
+        )}
 
+        <form onSubmit={handleSend} className="flex items-center gap-2">
           {/* Text Input area */}
           <input
             type="text"
             placeholder="Ваше сообщение..."
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            disabled={uploading}
             className="flex-1 h-12 px-4 rounded-2xl bg-bg-elevated border border-line/45 text-ink placeholder:text-ink-soft focus:outline-none focus:border-brand-500/50 transition-colors text-sm font-sans"
           />
 
           {/* Send Button */}
           <Button
             type="submit"
-            disabled={!inputText.trim() || uploading}
+            disabled={!inputText.trim()}
             className="w-12 h-12 p-0 rounded-2xl flex items-center justify-center flex-shrink-0"
           >
             <Send className="w-4.5 h-4.5" />

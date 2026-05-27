@@ -70,6 +70,15 @@ const WALLET_KIND = {
   other:         { label: 'Другое',            color: '#475569' },
 };
 
+const PAYMENT_TYPE_LABEL = {
+  cash:     'Наличные',
+  card:     'Карта',
+  qr:       'QR',
+  bank:     'Банк',
+  transfer: 'Перевод',
+  other:    'Другое',
+};
+
 const PERIODS = [
   { id: '7d',  label: '7 дней',  days: 7  },
   { id: '30d', label: '30 дней', days: 30 },
@@ -614,10 +623,11 @@ export default function CashflowScreen() {
         <Input label="Категория" value={editForm.cashflow_category} onChange={(e) => setEditForm((c) => ({ ...c, cashflow_category: e.target.value }))} />
         <Select label="Способ оплаты" value={editForm.payment_type} onChange={(e) => setEditForm((c) => ({ ...c, payment_type: e.target.value }))}>
           <option value="">—</option>
-          <option value="cash">Cash</option>
-          <option value="card">Card</option>
-          <option value="bank">Bank</option>
-          <option value="transfer">Transfer</option>
+          <option value="cash">Наличные</option>
+          <option value="card">Карта</option>
+          <option value="qr">QR</option>
+          <option value="bank">Банк</option>
+          <option value="transfer">Перевод</option>
         </Select>
         <Select label="С кошелька" value={editForm.wallet_from} onChange={(e) => setEditForm((c) => ({ ...c, wallet_from: e.target.value }))}>
           <option value="">—</option>
@@ -677,7 +687,7 @@ function OpRow({ row, index, canEdit, canDelete, onEdit, onDelete }) {
             <Calendar className="w-3 h-3 text-ink-soft flex-shrink-0" />
             {formatDate(row.date)}
             {row.counterparty?.name ? ` · ${row.counterparty.name}` : ''}
-            {row.payment_type ? ` · ${row.payment_type}` : ''}
+            {row.payment_type ? ` · ${PAYMENT_TYPE_LABEL[row.payment_type] ?? row.payment_type}` : ''}
           </div>
         </div>
       </div>
@@ -705,7 +715,7 @@ function OpRow({ row, index, canEdit, canDelete, onEdit, onDelete }) {
                 className="h-8 w-8 p-0 flex items-center justify-center rounded-lg bg-bg-elevated/70 border border-line hover:bg-bg-elevated transition-colors"
                 onClick={(e) => {
                   e.stopPropagation();
-                  openEditRow(row);
+                  onEdit?.(row);
                 }}
               >
                 <Pencil className="w-3.5 h-3.5 text-ink-muted" />

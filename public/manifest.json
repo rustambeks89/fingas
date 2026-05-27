@@ -1,0 +1,23 @@
+{
+  "short_name": "fingas",
+  "name": "fingas — Учет АЗС",
+  "description": "Мобильный учет АЗС: смены, продажи, финансы, остатки, налоги, поставщики",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0A0C10",
+  "theme_color": "#0A0C10",
+  "display": "standalone",
+  "orientation": "portrait",
+  "categories": ["business", "finance"]
+}

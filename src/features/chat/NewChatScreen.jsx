@@ -19,7 +19,7 @@ import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/status/EmptyState';
 import { useOrgContext } from '@/hooks/useOrgContext';
 import { useAuth } from '@/hooks/useAuth';
-import { createDirectThread } from '@/services/chatService';
+import { createDirectThread, createOrganizationThread, createStationThread } from '@/services/chatService';
 import { listEmployees } from '@/services/profileService';
 import { ROLE_LABELS, ROLES } from '@/lib/constants';
 
@@ -69,7 +69,35 @@ export default function NewChatScreen() {
       navigate(`/more/chat/${threadId}`, { replace: true });
     } catch (e) {
       console.error('[Fingas NewChatScreen] Create thread error', e);
-      setErr('Не удалось создать диалог с сотрудником.');
+      setErr(e?.message ?? 'Не удалось создать диалог с сотрудником.');
+      setCreating(false);
+    }
+  }
+
+  async function handleCreateOrgChat() {
+    if (!organizationId) return;
+    setCreating(true);
+    setErr('');
+    try {
+      const threadId = await createOrganizationThread(organizationId);
+      navigate(`/more/chat/${threadId}`, { replace: true });
+    } catch (e) {
+      console.error('[Fingas NewChatScreen] Create org thread error', e);
+      setErr(e?.message ?? 'Не удалось открыть общий чат компании.');
+      setCreating(false);
+    }
+  }
+
+  async function handleCreateStationChat(stId) {
+    if (!stId) return;
+    setCreating(true);
+    setErr('');
+    try {
+      const threadId = await createStationThread(stId);
+      navigate(`/more/chat/${threadId}`, { replace: true });
+    } catch (e) {
+      console.error('[Fingas NewChatScreen] Create station thread error', e);
+      setErr(e?.message ?? 'Не удалось открыть чат АЗС.');
       setCreating(false);
     }
   }
@@ -103,7 +131,69 @@ export default function NewChatScreen() {
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <ScreenHeader title="Новый чат" subtitle="Выберите сотрудника для личной переписки" />
+        <ScreenHeader title="Новый чат" subtitle="Выберите сотрудника или откройте общий чат" />
+      </div>
+
+      {/* General Chats Section */}
+      <div className="mb-5 mt-3">
+        <div className="text-[10px] uppercase tracking-[0.18em] text-brand-500 font-bold px-1.5 mb-2.5">
+          Общие чаты
+        </div>
+        <div className={user?.profile?.role === 'operator' ? 'grid grid-cols-1' : 'grid grid-cols-1 sm:grid-cols-2 gap-3'}>
+          {/* Button: Organization Chat */}
+          {user?.profile?.role !== 'operator' && (
+            <Card
+              hoverable
+              onClick={handleCreateOrgChat}
+              className="flex items-center gap-3.5 p-3.5 rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl"
+            >
+              <div className="w-10 h-10 rounded-xl border border-blue-500/20 bg-blue-500/10 text-blue-400 flex items-center justify-center flex-shrink-0">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-sm text-ink truncate">Чат всей компании</div>
+                <div className="text-[10px] text-ink-soft truncate mt-0.5">Связаться со всей командой</div>
+              </div>
+              <MessageCircle className="w-4 h-4 text-brand-400 flex-shrink-0" />
+            </Card>
+          )}
+
+          {/* Button/Selector: Station Chats */}
+          {user?.profile?.role === 'owner' ? (
+            <div className="space-y-2">
+              <div className="text-[9px] uppercase text-ink-soft font-bold px-1.5 mt-1">Чат конкретной АЗС:</div>
+              <div className="grid grid-cols-2 gap-2">
+                {stations.map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => handleCreateStationChat(st.id)}
+                    className="h-10 px-3 rounded-xl border border-line bg-bg-card text-xs font-bold text-ink hover:border-brand-500/30 active:scale-95 transition-all text-left truncate cursor-pointer"
+                  >
+                    📍 {st.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            stationId && (
+              <Card
+                hoverable
+                onClick={() => handleCreateStationChat(stationId)}
+                className="flex items-center gap-3.5 p-3.5 rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl"
+              >
+                <div className="w-10 h-10 rounded-xl border border-brand-500/20 bg-brand-500/10 text-brand-500 flex items-center justify-center flex-shrink-0">
+                  <MapPin className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm text-ink truncate">Чат моей АЗС</div>
+                  <div className="text-[10px] text-ink-soft truncate mt-0.5">В рамках вашей заправки</div>
+                </div>
+                <MessageCircle className="w-4 h-4 text-brand-400 flex-shrink-0" />
+              </Card>
+            )
+          )}
+        </div>
       </div>
 
       <motion.div

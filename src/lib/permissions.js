@@ -31,13 +31,39 @@ export function isOwner(user) {
   return isActive(user) && user.profile.role === ROLES.OWNER;
 }
 
-// Returns the merged permission row for a (user, module). Owners always get all.
-// `user.permissions` is expected as a map: { module: { can_view, ... } }.
 export function permissionsFor(user, module) {
   if (!isActive(user)) return {};
   if (user.profile.role === ROLES.OWNER) return ALL_TRUE;
+  
   const map = user.permissions || {};
-  return map[module] || {};
+  const userPerms = map[module] || {};
+  
+  if (user.profile.role === ROLES.OPERATOR) {
+    if (module === 'shifts') {
+      return {
+        can_view: true,
+        can_create: true,
+        ...userPerms
+      };
+    }
+    if (module === 'chat') {
+      return {
+        can_view: true,
+        can_create: true,
+        can_edit: true,
+        can_delete: true,
+        ...userPerms
+      };
+    }
+    if (module === 'notifications') {
+      return {
+        can_view: true,
+        ...userPerms
+      };
+    }
+  }
+
+  return userPerms;
 }
 
 export function hasPermission(user, module, action) {

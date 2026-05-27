@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { createCashflow, listWallets } from '@/services/cashflowService';
 import { listCounterparties } from '@/services/counterpartyService';
 import { useAuth } from '@/hooks/useAuth';
+import { useFormPersistence } from '@/hooks/useFormPersistence';
 
 const TITLE = {
   income:     'Приход',
@@ -31,7 +32,7 @@ export function CashflowQuickForm({ mode = 'expense', onDone, onCancel }) {
 
   const isAdjustment = mode === 'adjustment';
 
-  const [form, setForm] = useState({
+  const [form, setForm, clearDraft] = useFormPersistence('cashflow_quick_' + mode, {
     date: today,
     amount: '',
     cashflow_category: isAdjustment ? 'Корректировка' : '',
@@ -97,6 +98,7 @@ export function CashflowQuickForm({ mode = 'expense', onDone, onCancel }) {
         status: isCollection ? 'pending_confirmation' : 'confirmed',
         created_by: user?.id,
       });
+      clearDraft();
       onDone?.();
     } catch (e2) {
       setErr(e2?.message ?? 'Не удалось сохранить');

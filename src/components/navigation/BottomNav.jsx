@@ -10,14 +10,12 @@ import {
   Menu,
   Plus,
   TrendingUp,
-  MessageSquare,
+  Wallet,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
-import { useUnreadMessages } from '@/hooks/useUnreadMessages';
 import { QuickAddSheet } from '@/components/bottom-sheets/QuickAddSheet';
 
 export function BottomNav() {
-  const { unreadCount } = useUnreadMessages();
   const [showActions, setShowActions] = useState(false);
 
   return (
@@ -90,8 +88,8 @@ export function BottomNav() {
                 </div>
               </li>
 
-              {/* 4. Сообщения */}
-              <li><TabItem to="/more/chat" label="Чат" icon={MessageSquare} badge={unreadCount > 0} /></li>
+              {/* 4. Кэшфлоу */}
+              <li><TabItem to="/cashflow" label="Кэшфлоу" icon={Wallet} /></li>
 
               {/* 5. Меню */}
               <li><TabItem to="/more" label="Меню" icon={Menu} exact /></li>

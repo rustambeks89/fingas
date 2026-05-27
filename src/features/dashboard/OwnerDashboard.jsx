@@ -13,6 +13,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 const TrendChart = lazy(() => import('./TrendChart'));
+const DashboardChatCard = lazy(() => import('./DashboardChatCard'));
 import {
   AlertTriangle,
   Building2,
@@ -67,6 +68,7 @@ const PERIODS = [
 const REPORTS = [
   { to: '/shifts',          label: 'Сменный отчёт',         icon: ClipboardList, desc: 'Смены · сверка · расхождения' },
   { to: '/pl',              label: 'P&L',                   icon: TrendingUp,    desc: 'Выручка · себест. · маржа' },
+  { to: '/employees',       label: 'Сотрудники',            icon: Users,         desc: 'Карточки · ставки · выплаты' },
   { to: '/counterparties',  label: 'Контрагенты',           icon: Users,         desc: 'Сальдо · долги · поставщики' },
   { to: '/cashflow',        label: 'Кэшфлоу',               icon: Wallet,        desc: 'Приход · расход · поток' },
   { to: '/taxes',           label: 'Налоги',                icon: Receipt,       desc: 'Платежи и периоды' },
@@ -488,7 +490,7 @@ export default function OwnerDashboard() {
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
                 className="transition-transform duration-250 cursor-pointer"
-                onClick={() => setSelectedTank(t)}
+                onClick={() => navigate(`/tanks/${t.id}`)}
               >
                 <TankCard
                   name={t.name}
@@ -507,6 +509,11 @@ export default function OwnerDashboard() {
           </div>
         )}
       </Card>
+
+      {/* CHAT WIDGET */}
+      <Suspense fallback={null}>
+        <DashboardChatCard />
+      </Suspense>
 
       {/* QUICK REPORTS TILES PANEL */}
       <Card className="!p-4 shadow-card border border-line/30 bg-bg-card/75 backdrop-blur-2xl">

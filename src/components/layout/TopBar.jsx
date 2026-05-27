@@ -138,39 +138,35 @@ export function TopBar() {
     };
   }, [userId, load, showToast]);
 
-  // Unread count
-  const unreadRows = useMemo(() => rows.filter((n) => !n.is_read), [rows]);
-  const unreadCount = unreadRows.length;
+  // Unread count (all loaded notifications are unread since read ones are deleted)
+  const unreadCount = rows.length;
 
-  // Mark notification as read
+  // Mark notification as read (deletes it from DB)
   async function markAsRead(id) {
-    const found = rows.find((n) => n.id === id);
-    if (!found || found.is_read) return;
-    
-    // Optimistic update
-    setRows((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    // Optimistic local deletion
+    setRows((prev) => prev.filter((n) => n.id !== id));
 
     try {
       await supabase
         .from('notifications')
-        .update({ is_read: true })
+        .delete()
         .eq('id', id);
     } catch {/* noop */}
   }
 
-  // Mark all read
+  // Mark all read (deletes all notifications from DB)
   async function markAllRead() {
-    const unreadIds = rows.filter((n) => !n.is_read).map((n) => n.id);
-    if (unreadIds.length === 0) return;
+    const ids = rows.map((n) => n.id);
+    if (ids.length === 0) return;
 
-    // Optimistic update
-    setRows((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    // Optimistic local deletion
+    setRows([]);
 
     try {
       await supabase
         .from('notifications')
-        .update({ is_read: true })
-        .in('id', unreadIds);
+        .delete()
+        .in('id', ids);
     } catch {/* noop */}
   }
 
@@ -252,7 +248,7 @@ export function TopBar() {
                     Уведомления
                   </h3>
                   <p className="text-[10px] text-white/50 font-bold uppercase tracking-wider mt-0.5">
-                    {unreadCount > 0 ? `${unreadCount} непрочитанных` : 'Все прочитано'}
+                    {unreadCount > 0 ? `${unreadCount} новых` : 'Уведомлений нет'}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -262,7 +258,7 @@ export function TopBar() {
                       onClick={markAllRead}
                       className="h-8 px-2.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white text-[10px] font-black flex items-center gap-1 transition select-none cursor-pointer"
                     >
-                      <CheckCheck className="w-3.5 h-3.5 text-brand-400" /> Прочитать все
+                      <CheckCheck className="w-3.5 h-3.5 text-brand-400" /> Очистить все
                     </button>
                   )}
                   {/* Removed close button ('X') as requested */}
@@ -305,12 +301,10 @@ export function TopBar() {
                       }}
                       className="block active:scale-[0.99] transition-all cursor-pointer"
                     >
-                      <div className={`p-3 rounded-xl border transition-all duration-200 relative ${n.is_read ? 'bg-white/[0.02] border-white/[0.03] text-white/60' : 'bg-brand-500/5 border-brand-500/20 text-white'}`}>
-                        {!n.is_read && (
-                          <span className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full bg-brand-500 shadow-[0_0_6px_rgba(239,68,68,0.8)] animate-pulse" />
-                        )}
+                      <div className="p-3 rounded-xl border transition-all duration-200 relative bg-brand-500/5 border-brand-500/20 text-white">
+                        <span className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full bg-brand-500 shadow-[0_0_6px_rgba(239,68,68,0.8)] animate-pulse" />
                         <div className="flex items-start gap-2.5 min-w-0 pr-4">
-                          <div className={`w-8.5 h-8.5 rounded-lg border flex items-center justify-center flex-shrink-0 ${n.is_read ? 'bg-white/[0.03] border-white/[0.05] text-white/40' : 'bg-brand-500/10 border-brand-500/20 text-brand-400'}`}>
+                          <div className="w-8.5 h-8.5 rounded-lg border flex items-center justify-center flex-shrink-0 bg-brand-500/10 border-brand-500/20 text-brand-400">
                             <Bell className="w-4.5 h-4.5" />
                           </div>
                           <div className="flex-1 min-w-0">

@@ -12,6 +12,7 @@ import { listCounterparties } from '@/services/counterpartyService';
 import { listStations } from '@/services/stationService';
 import { tankLitersAtCm, listTankCalibrationGrid } from '@/services/tankService';
 import { useAuth } from '@/hooks/useAuth';
+import { useFormPersistence } from '@/hooks/useFormPersistence';
 
 const FUEL_TYPES = ['АИ-92', 'АИ-95', 'АИ-98', 'ДТ', 'Газ'];
 
@@ -26,7 +27,7 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
   const [gridSize, setGridSize] = useState(0); // points count in tank's grid
   const [litersBefore, setLitersBefore] = useState(null);
   const [litersAfter, setLitersAfter] = useState(null);
-  const [form, setForm] = useState({
+  const [form, setForm, clearDraft] = useFormPersistence('fuel_supply_quick', {
     date: today,
     station_id: '',
     supplier_id: '',
@@ -35,6 +36,8 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
     liters_doc: '',
     liters_actual: '',
     price_per_liter: '',
+    density: '',
+    temperature: '',
     level_before_cm: '',
     level_after_cm: '',
     logistics_cost: '',
@@ -47,16 +50,14 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
 
   useEffect(() => {
     if (!orgId) return;
-    Promise.all([
-      listCounterparties({ organizationId: orgId, type: 'supplier', active: true }),
-      listStations(orgId).catch(() => []),
-    ]).then(([supplierRows, stationRows]) => {
-      setSuppliers(supplierRows);
-      setStations(stationRows);
-    }).catch(() => {
-      setSuppliers([]);
-      setStations([]);
-    });
+    // Загружаем поставщиков и станции независимо, чтобы ошибка одного
+    // не обнуляла другой (например, RLS может блокировать counterparties).
+    listCounterparties({ organizationId: orgId, type: 'supplier', active: true })
+      .then(setSuppliers)
+      .catch(() => setSuppliers([]));
+    listStations(orgId)
+      .then(setStations)
+      .catch(() => setStations([]));
   }, [orgId]);
 
   // Load grid size for the selected tank to know if conversion is available.
@@ -117,16 +118,20 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
         liters_doc,
         liters_actual,
         price_per_liter,
+        density: form.density !== '' ? Number(form.density) : null,
+        temperature: form.temperature !== '' ? Number(form.temperature) : null,
         level_before_cm: form.level_before_cm !== '' ? Number(form.level_before_cm) : null,
         level_after_cm: form.level_after_cm !== '' ? Number(form.level_after_cm) : null,
         measurement_before_liters: litersBefore,
         measurement_after_liters: litersAfter,
-        logistics_cost: form.logistics_cost !== '' ? Number(form.logistics_cost) : 0,
+        // Сохраняем итоговую сумму логистики (ставка × литры_факт)
+        logistics_cost: logisticsRate > 0 && litersActual > 0 ? logisticsTotal : 0,
         driver: form.driver || null,
         vehicle: form.vehicle || null,
         note: form.note || null,
         created_by: user?.id,
       });
+      clearDraft();
       onDone?.();
     } catch (e2) {
       setErr(e2?.message ?? 'Не удалось сохранить');
@@ -138,10 +143,13 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
   const litersDoc = Number(form.liters_doc) || 0;
   const litersActual = Number(form.liters_actual) || 0;
   const pricePerLiter = Number(form.price_per_liter) || 0;
-  const logistics = Number(form.logistics_cost) || 0;
+  // logistics_cost — ставка за литр (сом/л), итог = ставка × литры_факт
+  const logisticsRate = Number(form.logistics_cost) || 0;
+  const logisticsTotal = logisticsRate * litersActual;
   const docVariance = litersActual - litersDoc;
   const supplierTotal = litersActual * pricePerLiter;
-  const costPerLiterTotal = litersActual > 0 ? (supplierTotal + logistics) / litersActual : 0;
+  // Себестоимость = цена поставщика + ставка логистики (оба уже в сом/л)
+  const costPerLiterTotal = pricePerLiter + logisticsRate;
 
   const measuredDelta = (litersBefore != null && litersAfter != null) ? litersAfter - litersBefore : null;
   const measureVsDoc = (measuredDelta != null && litersDoc > 0) ? measuredDelta - litersDoc : null;
@@ -242,12 +250,27 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
 
       <Input label="Цена за литр, сом" type="number" step="0.01" min="0" value={form.price_per_liter} onChange={(e) => setForm({ ...form, price_per_liter: e.target.value })} required />
 
+      <div className="grid grid-cols-2 gap-3">
+        <Input
+          label="Плотность"
+          type="number" step="0.0001" min="0"
+          value={form.density}
+          onChange={(e) => setForm({ ...form, density: e.target.value })}
+        />
+        <Input
+          label="Температура, °C"
+          type="number" step="0.01"
+          value={form.temperature}
+          onChange={(e) => setForm({ ...form, temperature: e.target.value })}
+        />
+      </div>
+
       <Input
-        label="Логистика (доставка), сом"
-        type="number" step="0.01" min="0"
+        label="Тариф логистики, сом/л"
+        type="number" step="0.0001" min="0"
         value={form.logistics_cost}
         onChange={(e) => setForm({ ...form, logistics_cost: e.target.value })}
-        hint="В долг поставщику НЕ идёт. Идёт в себестоимость литра и оплачивается перевозчику отдельно."
+        hint="Ставка за литр. Итоговая сумма = тариф × литры факт. В долг поставщику не входит."
       />
 
       {supplierTotal > 0 && (
@@ -256,10 +279,12 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
             <span className="text-ink-muted">К оплате поставщику</span>
             <span className="font-semibold text-ink">{supplierTotal.toLocaleString('ru-RU')} сом</span>
           </div>
-          {logistics > 0 && (
+          {logisticsRate > 0 && (
             <div className="flex items-center justify-between text-xs">
-              <span className="text-ink-soft">+ логистика (отдельно перевозчику)</span>
-              <span className="text-ink-muted">{logistics.toLocaleString('ru-RU')} сом</span>
+              <span className="text-ink-soft">
+                + логистика ({logisticsRate.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} сом/л × {litersActual.toFixed(3)} л)
+              </span>
+              <span className="text-ink-muted">{logisticsTotal.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} сом</span>
             </div>
           )}
           <div className="border-t border-line/50 pt-1.5 flex items-center justify-between text-sm">

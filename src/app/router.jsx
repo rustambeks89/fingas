@@ -24,6 +24,7 @@ const DashboardScreen = lazy(() => import('@/features/dashboard/DashboardScreen'
 
 // Everything else lazy.
 const EmployeesScreen = lazy(() => import('@/features/employees/EmployeesScreen'));
+const EmployeeDetailScreen = lazy(() => import('@/features/employees/EmployeeDetailScreen'));
 const EmployeePermissionsScreen = lazy(() => import('@/features/permissions/EmployeePermissionsScreen'));
 const ShiftsScreen = lazy(() => import('@/features/shifts/ShiftsScreen'));
 const SalesScreen = lazy(() => import('@/features/sales/SalesScreen'));
@@ -42,6 +43,7 @@ const DocumentsScreen = lazy(() => import('@/features/documents/DocumentsScreen'
 const NotificationsScreen = lazy(() => import('@/features/notifications/NotificationsScreen'));
 const SettingsScreen = lazy(() => import('@/features/settings/SettingsScreen'));
 const ProfileScreen = lazy(() => import('@/features/profile/ProfileScreen'));
+const MyEarningsScreen = lazy(() => import('@/features/earnings/MyEarningsScreen'));
 const MoreScreen = lazy(() => import('@/features/more/MoreScreen'));
 const SystemScreen = lazy(() => import('@/features/system/SystemScreen'));
 const TanksScreen = lazy(() => import('@/features/tanks/TanksScreen'));
@@ -51,6 +53,7 @@ const FuelTypesScreen = lazy(() => import('@/features/directories/FuelTypesScree
 const CashflowCategoriesScreen = lazy(() => import('@/features/directories/CashflowCategoriesScreen'));
 const WalletsScreen = lazy(() => import('@/features/directories/WalletsScreen'));
 const TankCalibrationGridScreen = lazy(() => import('@/features/directories/TankCalibrationGridScreen'));
+const EmployeeRatesScreen = lazy(() => import('@/features/directories/EmployeeRatesScreen'));
 const ChatListScreen = lazy(() => import('@/features/chat/ChatListScreen'));
 const ChatThreadScreen = lazy(() => import('@/features/chat/ChatThreadScreen'));
 const NewChatScreen = lazy(() => import('@/features/chat/NewChatScreen'));
@@ -134,9 +137,11 @@ export function AppRouter() {
         <Route path="documents" element={<ModuleRoute module={MODULES.DOCUMENTS}><DocumentsScreen /></ModuleRoute>} />
         <Route path="notifications" element={<ModuleRoute module={MODULES.NOTIFICATIONS}><NotificationsScreen /></ModuleRoute>} />
         <Route path="employees" element={<ModuleRoute module={MODULES.EMPLOYEES}><EmployeesScreen /></ModuleRoute>} />
+        <Route path="employees/:userId" element={<ModuleRoute module={MODULES.EMPLOYEES}><EmployeeDetailScreen /></ModuleRoute>} />
         <Route path="employees/:userId/permissions" element={<ModuleRoute module={MODULES.EMPLOYEES}><EmployeePermissionsScreen /></ModuleRoute>} />
         <Route path="settings" element={<ModuleRoute module={MODULES.SETTINGS}><SettingsScreen /></ModuleRoute>} />
         <Route path="profile" element={<ProfileScreen />} />
+        <Route path="my-earnings" element={<MyEarningsScreen />} />
         <Route path="more" element={<MoreScreen />} />
         <Route path="system" element={<SystemScreen />} />
         <Route path="tanks" element={<ModuleRoute module={MODULES.FUEL_BALANCES}><TanksScreen /></ModuleRoute>} />
@@ -146,6 +151,7 @@ export function AppRouter() {
         <Route path="directories/cashflow-categories" element={<ModuleRoute module={MODULES.SETTINGS}><CashflowCategoriesScreen /></ModuleRoute>} />
         <Route path="directories/wallets" element={<ModuleRoute module={MODULES.SETTINGS}><WalletsScreen /></ModuleRoute>} />
         <Route path="directories/tank-calibration-grid" element={<ModuleRoute module={MODULES.SETTINGS}><TankCalibrationGridScreen /></ModuleRoute>} />
+        <Route path="directories/employee-rates" element={<ModuleRoute module={MODULES.SETTINGS}><EmployeeRatesScreen /></ModuleRoute>} />
         <Route path="more/chat" element={<ModuleRoute module={MODULES.CHAT}><ChatListScreen /></ModuleRoute>} />
         <Route path="more/chat/:threadId" element={<ModuleRoute module={MODULES.CHAT}><ChatThreadScreen /></ModuleRoute>} />
         <Route path="more/chat/:threadId/settings" element={<ModuleRoute module={MODULES.CHAT}><ChatSettingsScreen /></ModuleRoute>} />

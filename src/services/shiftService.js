@@ -906,3 +906,63 @@ export async function listPendingShifts({ stationId, limit = 50 } = {}) {
   if (error) throw error;
   return data ?? [];
 }
+
+// ===========================================================================
+// REPORT LINES & EDIT OVERRIDES
+// ===========================================================================
+
+export async function listShiftReportLines(reportId) {
+  const { data, error } = await supabase
+    .from('shift_report_lines')
+    .select('*')
+    .eq('shift_report_id', reportId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function saveShiftReportLines(reportId, organizationId, stationId, lines) {
+  const toDelete = lines.filter((l) => l._deleted && l.id);
+  const toUpsert = lines.filter((l) => !l._deleted).map((l) => {
+    const r = {
+      shift_report_id: reportId,
+      organization_id: organizationId,
+      station_id: stationId ?? null,
+      kind: l.kind,
+      category: l.category || null,
+      amount: Number(l.amount) || 0,
+      counterparty_id: l.counterparty_id || null,
+      wallet_id: l.wallet_id || null,
+      payment_type: l.payment_type || 'cash',
+      note: l.note || null,
+    };
+    if (l.id && !String(l.id).startsWith('temp-')) {
+      r.id = l.id;
+    }
+    return r;
+  });
+
+  if (toDelete.length > 0) {
+    const { error: delErr } = await supabase
+      .from('shift_report_lines')
+      .delete()
+      .in('id', toDelete.map((l) => l.id));
+    if (delErr) throw delErr;
+  }
+
+  if (toUpsert.length > 0) {
+    const { error: upsErr } = await supabase
+      .from('shift_report_lines')
+      .upsert(toUpsert);
+    if (upsErr) throw upsErr;
+  }
+}
+
+export async function updateShiftReport(reportId, patch) {
+  const { data, error } = await supabase.rpc('fingas_update_shift_report', {
+    p_report_id: reportId,
+    p_patch: patch,
+  });
+  if (error) throw error;
+  return data;
+}

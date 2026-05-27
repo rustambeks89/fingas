@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/hooks/useAuth';
 import { formatMoney, formatDateTime } from '@/lib/formatters';
 import { getCurrentOpenShift } from '@/services/shiftService';
-import DashboardChatCard from './DashboardChatCard';
+
 
 export default function OperatorDashboard() {
   const { user } = useAuth();
@@ -99,20 +99,19 @@ export default function OperatorDashboard() {
         </div>
       </motion.div>
 
-      {/* Chat Card */}
-      <DashboardChatCard />
 
-      {/* My Compensation Info Card */}
-      <Link to="/profile" className="block">
+
+      {/* My Compensation Info Card → детальная карточка сотрудника (моя) */}
+      <Link to="/my-earnings" className="block">
         <Card hoverable className="!p-3 flex items-center justify-between border-line/40 bg-bg-card">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-success/10 border border-success/20 text-success flex items-center justify-center">
               <Wallet className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-xs font-semibold text-ink">Мой заработок</div>
+              <div className="text-xs font-semibold text-ink">Моя зарплата</div>
               <div className="text-[10px] text-ink-muted mt-0.5">
-                {liter ? `${formatMoney(liter, 'сом/л')} с каждого проданного литра` : 'Фиксированная или сдельная ставка'}
+                {liter ? `${formatMoney(liter, 'сом/л')} с каждого проданного литра` : 'Смены · начисления · выплаты'}
               </div>
             </div>
           </div>

@@ -13,7 +13,6 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Banknote,
   Bell,
   Building2,
   ChevronRight,
@@ -50,8 +49,15 @@ import { formatMoney } from '@/lib/formatters';
 
 function buildSections(user, owner) {
   const can = (m) => owner || hasPermission(user, m, 'can_view');
+  const isOperator = user?.profile?.role === 'operator';
 
   return [
+    ...(isOperator ? [{
+      title: 'Личный кабинет',
+      items: [
+        { label: 'Мой заработок', icon: Wallet, to: '/my-earnings' },
+      ],
+    }] : []),
     {
       title: 'Справочники',
       items: [
@@ -153,15 +159,6 @@ export default function MoreScreen() {
         </div>
       </Link>
 
-      {/* Operational indicators - Employees requests horizontal row */}
-      <PulseRow
-        to="/employees"
-        label="Заявки сотрудников"
-        value={pulse.employeeRequests}
-        icon={Users}
-        tone={pulse.employeeRequests > 0 ? 'warn' : 'default'}
-      />
-
       {/* Directories sections */}
       <div className="space-y-4">
         {sections.map((s, sIdx) => (
@@ -224,36 +221,3 @@ export default function MoreScreen() {
   );
 }
 
-function PulseRow({ to, label, value, icon: Icon, tone }) {
-  const ring =
-    tone === 'warn'   ? 'border-warning/35 bg-warning/5 hover:border-warning/60' :
-    tone === 'danger' ? 'border-danger/35 bg-danger/5 hover:border-danger/60' :
-                        'border-line/30 hover:border-brand-500/25';
-  const iconCls =
-    tone === 'warn'   ? 'bg-warning/10 border-warning/20 text-warning animate-pulse' :
-    tone === 'danger' ? 'bg-danger/10 border-danger/20 text-danger' :
-                        'bg-brand-500/10 border-brand-500/20 text-brand-500';
-  return (
-    <Link to={to} className="block active:scale-[0.99] transition-transform min-w-0">
-      <div className={`rounded-2xl bg-bg-card/85 backdrop-blur-md border ${ring} p-3.5 flex items-center justify-between gap-3 min-w-0 shadow-sm group cursor-pointer transition-all duration-200 hover:shadow-md relative overflow-hidden`}>
-        {/* Subtle brand marker left bar on hover */}
-        <div className="absolute left-0 top-2.5 bottom-2.5 w-1 rounded-r-lg bg-brand-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-        
-        <div className="flex items-center gap-3.5 min-w-0">
-          <div className={`w-8.5 h-8.5 rounded-xl border flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform duration-200 shadow-inner ${iconCls}`}>
-            <Icon className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-xs font-black text-ink truncate leading-tight group-hover:text-brand-400 transition-colors">
-              {label}
-            </div>
-            <span className="text-[9px] text-ink-soft block mt-1 font-bold uppercase tracking-wider">ожидают одобрения владельцем</span>
-          </div>
-        </div>
-        <div className="text-xs font-black text-ink tabular-nums flex-shrink-0 bg-bg-elevated/80 dark:bg-white/5 border border-line/30 px-3.5 py-1.5 rounded-xl shadow-inner">
-          {value}
-        </div>
-      </div>
-    </Link>
-  );
-}

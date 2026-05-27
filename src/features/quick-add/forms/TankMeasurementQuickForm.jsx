@@ -13,6 +13,7 @@ import { createTankMeasurement } from '@/services/fuelService';
 import { listStations } from '@/services/stationService';
 import { listTankCalibrationGrid, tankLitersAtCm } from '@/services/tankService';
 import { useAuth } from '@/hooks/useAuth';
+import { useFormPersistence } from '@/hooks/useFormPersistence';
 
 const FUEL_TYPES = ['АИ-92', 'АИ-95', 'АИ-98', 'ДТ', 'Газ'];
 
@@ -26,7 +27,7 @@ export function TankMeasurementQuickForm({ onDone, onCancel, defaultTankId = nul
   const [stationId, setStationId] = useState(profileStationId ?? '');
   const [gridSize, setGridSize] = useState(0);
   const [computedLiters, setComputedLiters] = useState(null);
-  const [form, setForm] = useState({
+  const [form, setForm, clearDraft] = useFormPersistence('tank_measurement_quick', {
     date: now.toISOString().slice(0, 10),
     time: now.toTimeString().slice(0, 5),
     fuel_type: defaultFuelType ?? 'АИ-92',
@@ -105,6 +106,7 @@ export function TankMeasurementQuickForm({ onDone, onCancel, defaultTankId = nul
         measured_by: user?.id,
         note: form.note || null,
       });
+      clearDraft();
       onDone?.();
     } catch (e2) {
       setErr(e2?.message ?? 'Не удалось сохранить');

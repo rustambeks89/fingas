@@ -34,14 +34,18 @@ export async function createCashflow(row) {
 }
 
 export async function updateCashflow(id, patch) {
+  // Без .single() — иначе при 0 строк (RLS-блок) получим невнятный PGRST116,
+  // а нам важно явно сообщить пользователю что прав не хватает.
   const { data, error } = await supabase
     .from('cashflow')
     .update(patch)
     .eq('id', id)
-    .select()
-    .single();
+    .select('*');
   if (error) throw error;
-  return data;
+  if (!data || data.length === 0) {
+    throw new Error('Изменение заблокировано (нет прав cashflow.can_edit или строка отсутствует).');
+  }
+  return data[0];
 }
 
 export async function deleteCashflow(id) {

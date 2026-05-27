@@ -23,6 +23,29 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
+  const [pushSupported, setPushSupported] = useState(false);
+  const [permission, setPermission] = useState('default');
+  const [isStandalone, setIsStandalone] = useState(false);
+
+  useEffect(() => {
+    setPushSupported('Notification' in window);
+    setPermission('Notification' in window ? Notification.permission : 'default');
+    setIsStandalone(
+      window.navigator.standalone || 
+      window.matchMedia('(display-mode: standalone)').matches
+    );
+  }, []);
+
+  async function requestPushPermission() {
+    if (!pushSupported) return;
+    try {
+      const res = await Notification.requestPermission();
+      setPermission(res);
+    } catch (e) {
+      console.warn('Failed to request push permission:', e);
+    }
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr('');
@@ -67,45 +90,27 @@ export default function NotificationsScreen() {
     };
   }, [userId, load]);
 
-  // auto-mark all unread mine as read on screen open
-  useEffect(() => {
-    if (!userId || rows.length === 0) return;
-    const unreadIds = rows
-      .filter((n) => !n.is_read && n.recipient_user_id === userId)
-      .map((n) => n.id);
-    if (unreadIds.length === 0) return;
-    supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .in('id', unreadIds)
-      .then(() => {
-        setRows((prev) => prev.map((n) =>
-          unreadIds.includes(n.id) ? { ...n, is_read: true } : n
-        ));
-      });
-  }, [rows, userId]);
+
 
   async function markAllRead() {
-    const unreadIds = rows.filter((n) => !n.is_read).map((n) => n.id);
-    if (unreadIds.length === 0) return;
+    const ids = rows.map((n) => n.id);
+    if (ids.length === 0) return;
     const { error } = await supabase
       .from('notifications')
-      .update({ is_read: true })
-      .in('id', unreadIds);
+      .delete()
+      .in('id', ids);
     if (!error) {
-      setRows((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setRows([]);
     }
   }
 
   async function markAsRead(id) {
-    const found = rows.find((n) => n.id === id);
-    if (!found || found.is_read) return;
     const { error } = await supabase
       .from('notifications')
-      .update({ is_read: true })
+      .delete()
       .eq('id', id);
     if (!error) {
-      setRows((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+      setRows((prev) => prev.filter((n) => n.id !== id));
     }
   }
 
@@ -116,20 +121,81 @@ export default function NotificationsScreen() {
     }
   }
 
-  const visibleRows = useMemo(() => rows.filter((n) => !n.is_read), [rows]);
-  const unread = visibleRows.length;
+  const visibleRows = rows;
+  const unread = rows.length;
 
   return (
     <div>
       <ScreenHeader
         title="Уведомления"
-        subtitle={unread > 0 ? `${unread} непрочитанных` : 'Всё прочитано'}
+        subtitle={unread > 0 ? `${unread} новых` : 'Уведомлений нет'}
         right={unread > 0 ? (
           <Button size="sm" variant="secondary" onClick={markAllRead}>
-            <CheckCheck className="w-4 h-4" /> Всё
+            Очистить
           </Button>
         ) : null}
       />
+
+      {/* PWA & Push Notifications Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="rounded-2xl border border-line/40 bg-bg-card p-3 shadow-sm mb-3 relative overflow-hidden"
+      >
+        <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-brand-500/5 blur-2xl" />
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-brand-500/10 border border-brand-500/20 text-brand-400 flex items-center justify-center flex-shrink-0">
+            <Bell className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-xs font-bold text-ink">Уведомления на телефоне</h3>
+            <p className="text-[10px] text-ink-muted mt-0.5">
+              {!pushSupported
+                ? 'Уведомления не поддерживаются на этом устройстве.'
+                : permission === 'granted'
+                ? 'Системные уведомления успешно подключены!'
+                : permission === 'denied'
+                ? 'Доступ заблокирован в системных настройках.'
+                : 'Получайте важные события и сообщения прямо на экран телефона.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3.5 pt-3 border-t border-line/20">
+          {!isStandalone && /iPhone|iPad|iPod/i.test(navigator.userAgent) ? (
+            <div className="text-[11px] text-brand-400 bg-brand-500/5 rounded-xl p-2.5 border border-brand-500/15 leading-relaxed">
+              <span className="font-bold">Чтобы получать уведомления на iPhone:</span>
+              <ol className="list-decimal list-inside mt-1 space-y-0.5 text-ink-muted">
+                <li>Нажмите кнопку <span className="font-semibold text-ink">«Поделиться»</span> (квадрат со стрелкой внизу)</li>
+                <li>Выберите <span className="font-semibold text-ink">«На экран Домой»</span></li>
+                <li>Запустите Fingas с экрана Домой и включите уведомления здесь</li>
+              </ol>
+            </div>
+          ) : pushSupported && permission === 'default' ? (
+            <Button
+              size="sm"
+              variant="brand"
+              className="w-full h-8 text-[11px] rounded-xl font-bold"
+              onClick={requestPushPermission}
+            >
+              Включить уведомления
+            </Button>
+          ) : pushSupported && permission === 'granted' ? (
+            <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] font-semibold text-success bg-success/5 border border-success/15 rounded-xl">
+              <span className="w-1.5 h-1.5 rounded-full bg-success animate-ping" />
+              Пуш-уведомления активны
+            </div>
+          ) : permission === 'denied' ? (
+            <div className="text-center py-1 text-[10px] text-ink-muted bg-bg-elevated rounded-xl">
+              Разрешите уведомления для Fingas в настройках телефона.
+            </div>
+          ) : (
+            <div className="text-center py-1 text-[10px] text-ink-soft bg-bg-elevated rounded-xl">
+              Добавьте Fingas на рабочий стол телефона как приложение.
+            </div>
+          )}
+        </div>
+      </motion.div>
 
       {!loading && (
         <motion.div
@@ -141,7 +207,7 @@ export default function NotificationsScreen() {
           <div className="relative">
             <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft font-bold">Центр событий</div>
             <div className="mt-1 text-xl font-bold text-ink">{rows.length}</div>
-            <div className="mt-0.5 text-xs text-ink-muted">{unread} непрочитанных · {rows.length - unread} прочитанных</div>
+            <div className="mt-0.5 text-xs text-ink-muted">{unread} активных уведомлений</div>
             <div className="grid grid-cols-2 gap-2 mt-2.5">
               <StatCard label="Новые" value={unread} tone="brand" />
               <StatCard label="Всего" value={rows.length} tone="default" />
@@ -167,10 +233,8 @@ export default function NotificationsScreen() {
       {!loading && visibleRows.length === 0 && (
         <EmptyState
           icon={Bell}
-          title={rows.length === 0 ? 'Тихо' : 'Всё прочитано'}
-          description={rows.length === 0
-            ? 'Новых уведомлений нет. Сюда придут события: новая заявка, закрытая смена, инкассация на подтверждение.'
-            : 'Непрочитанных уведомлений нет. Прочитанные уведомления скрыты из списка.'}
+          title="Тихо"
+          description="Новых уведомлений нет. Сюда будут приходить события: новая заявка, закрытая смена, инкассация на подтверждение."
         />
       )}
 
