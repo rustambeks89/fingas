@@ -192,8 +192,16 @@ async function loadAzsShiftMetaByShiftKeys({ shopKey, shiftKeys }) {
 // сгруппировать одним запросом — никаких пагинаций по 5000 строк на чанк.
 async function loadSellingCountByShiftKeys({ shopKey, shiftKeys }) {
   const counts = new Map();
-  const keys = [...new Set(shiftKeys.filter((key) => key != null))];
+  let keys = [...new Set(shiftKeys.filter((key) => key != null))];
   if (keys.length === 0) return counts;
+
+  // OPTIMIZATION: If there are many shifts (e.g., month or year view), only
+  // query transaction counts in azs_selling for the 30 most recent shifts.
+  // This avoids downloading up to 100,000 transaction rows and freezing the app.
+  if (keys.length > 30) {
+    keys.sort((a, b) => Number(b) - Number(a));
+    keys = keys.slice(0, 30);
+  }
 
   for (let i = 0; i < keys.length; i += SHIFT_KEY_CHUNK) {
     const chunk = keys.slice(i, i + SHIFT_KEY_CHUNK);
@@ -231,7 +239,7 @@ async function loadSellingCountByShiftKeys({ shopKey, shiftKeys }) {
 //   firstAt, lastAt, revenue, liters, fuels: {[fuel]: {liters, revenue}},
 //   parts: number  (>1 if rows were merged)
 // }
-export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } = {}) {
+export async function listShiftsFromBalance({ stationId, from, to, limit = 50, loadCounts = true } = {}) {
   const shopKey = await resolveShopKey(stationId);
 
   // 1. Raw azs_balance — только нужные колонки (раньше был select('*')
@@ -307,10 +315,12 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
       console.warn('[shiftService] azs_shift meta failed:', e?.message ?? e);
       return new Map();
     }),
-    loadSellingCountByShiftKeys({ shopKey, shiftKeys: keys }).catch((e) => {
-      console.warn('[shiftService] azs_selling count failed:', e?.message ?? e);
-      return new Map();
-    }),
+    loadCounts
+      ? loadSellingCountByShiftKeys({ shopKey, shiftKeys: keys }).catch((e) => {
+          console.warn('[shiftService] azs_selling count failed:', e?.message ?? e);
+          return new Map();
+        })
+      : Promise.resolve(new Map()),
   ]);
 
   // 4. Pull overrides for these shifts
@@ -479,7 +489,7 @@ function localYMD(value) {
 }
 
 export async function aggregateBalanceByDay({ stationId, from, to } = {}) {
-  const shifts = await listShiftsFromBalance({ stationId, from, to, limit: 5000 });
+  const shifts = await listShiftsFromBalance({ stationId, from, to, limit: 5000, loadCounts: false });
   const map = new Map();
   for (const s of shifts) {
     const day = localYMD(s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt);
@@ -504,7 +514,7 @@ export async function aggregateBalanceByDay({ stationId, from, to } = {}) {
 }
 
 export async function aggregateBalanceByMonth({ stationId, from, to } = {}) {
-  const shifts = await listShiftsFromBalance({ stationId, from, to, limit: 10000 });
+  const shifts = await listShiftsFromBalance({ stationId, from, to, limit: 10000, loadCounts: false });
   const map = new Map();
   for (const s of shifts) {
     const ymd = localYMD(s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt);
