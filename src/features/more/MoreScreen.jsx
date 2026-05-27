@@ -49,15 +49,8 @@ import { formatMoney } from '@/lib/formatters';
 
 function buildSections(user, owner) {
   const can = (m) => owner || hasPermission(user, m, 'can_view');
-  const isOperator = user?.profile?.role === 'operator';
 
   return [
-    ...(isOperator ? [{
-      title: 'Личный кабинет',
-      items: [
-        { label: 'Мой заработок', icon: Wallet, to: '/my-earnings' },
-      ],
-    }] : []),
     {
       title: 'Справочники',
       items: [
@@ -70,10 +63,16 @@ function buildSections(user, owner) {
       ],
     },
     {
+      title: 'Сотрудники',
+      items: [
+        { label: 'Сотрудники', icon: Users, to: '/counterparties?filter=employee', show: can(MODULES.EMPLOYEES) },
+      ],
+    },
+    {
       title: 'Система',
       items: [
         { label: 'Настройки',            icon: Settings, to: '/settings', show: can(MODULES.SETTINGS) },
-        { label: 'Статус синхронизации', icon: Settings,   to: '/system' },
+        { label: 'Статус синхронизации', icon: Settings,   to: '/system', show: owner },
       ],
     },
   ];

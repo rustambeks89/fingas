@@ -43,7 +43,7 @@ import {
   getCurrentShiftFromBalance,
   getShiftReportByKey,
   listPendingShiftReports,
-  listShiftsFromBalance,
+  listSalesShiftGroups,
   reviewShiftReport,
   setOperatorOverride,
   listShiftReportLines,
@@ -55,22 +55,6 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
 import { formatDateTime, formatLiters, formatMoney } from '@/lib/formatters';
 
-const PERIODS = [
-  { id: 'week',  label: 'Неделя' },
-  { id: 'month', label: 'Месяц'  },
-  { id: 'year',  label: 'Год'    },
-];
-
-function rangeFor(id) {
-  const now = new Date();
-  const to = new Date(now);
-  let from;
-  if (id === 'week')       from = new Date(now.getTime() - 6 * 86400000);
-  else if (id === 'month') from = new Date(now.getFullYear(), now.getMonth(), 1);
-  else                     from = new Date(now.getFullYear(), 0, 1);
-  from.setHours(0, 0, 0, 0);
-  return { from, to };
-}
 
 export default function ShiftsScreen() {
   const { user } = useAuth();
@@ -80,8 +64,8 @@ export default function ShiftsScreen() {
   const canReconcile = canCreate(MODULES.SHIFTS);
   const canReview = canApprove(MODULES.SHIFTS);
   const canRenameOperator = canEdit(MODULES.SHIFTS);
+  const isOperator = user?.profile?.role === 'operator';
 
-  const [period, setPeriod] = useState('week');
   const [current, setCurrent] = useState(null);
   const [shifts, setShifts] = useState([]);
   const [pending, setPending] = useState([]);
@@ -96,8 +80,14 @@ export default function ShiftsScreen() {
 
   const [cashiers, setCashiers] = useState([]);
   const [filterCashier, setFilterCashier] = useState('');
-  const [filterDateFrom, setFilterDateFrom] = useState('');
-  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [filterDateTo, setFilterDateTo] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
   const [filterShiftKey, setFilterShiftKey] = useState('');
 
   useEffect(() => {
@@ -118,17 +108,24 @@ export default function ShiftsScreen() {
     setLoading(true);
     setErr('');
     try {
-      const { from, to } = rangeFor(period);
-      const queryFrom = filterDateFrom ? new Date(filterDateFrom).toISOString() : from.toISOString();
-      const queryTo = filterDateTo ? new Date(filterDateTo + 'T23:59:59.999Z').toISOString() : to.toISOString();
+      const defaultFrom = new Date();
+      defaultFrom.setDate(defaultFrom.getDate() - 30);
+      defaultFrom.setHours(0, 0, 0, 0);
+
+      const defaultTo = new Date();
+      defaultTo.setHours(23, 59, 59, 999);
+
+      const queryFrom = filterDateFrom ? new Date(filterDateFrom).toISOString() : defaultFrom.toISOString();
+      const queryTo = filterDateTo ? new Date(filterDateTo + 'T23:59:59.999Z').toISOString() : defaultTo.toISOString();
 
       const [cur, list, pend] = await Promise.all([
         getCurrentShiftFromBalance({ stationId }).catch(() => null),
-        listShiftsFromBalance({
+        listSalesShiftGroups({
           stationId,
           from: queryFrom,
           to: queryTo,
           limit: 150,
+          includeCurrent: false,
         }).catch(() => []),
         canReview
           ? listPendingShiftReports({ stationId }).catch(() => [])
@@ -142,7 +139,7 @@ export default function ShiftsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [period, stationId, canReview, filterDateFrom, filterDateTo]);
+  }, [stationId, canReview, filterDateFrom, filterDateTo]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -245,7 +242,7 @@ export default function ShiftsScreen() {
     <div className="space-y-3 pb-2">
       <ScreenHeader
         title="Смены"
-        subtitle={user?.profile?.role === 'operator' ? 'Список моих рабочих смен и отчетов' : 'Все смены из POS · ShiftKey · azs_balance'}
+        subtitle={user?.profile?.role === 'operator' ? 'Список моих рабочих смен и отчетов' : 'Все смены и сданные отчеты АСУ'}
       />
 
       {err && (
@@ -254,66 +251,8 @@ export default function ShiftsScreen() {
         </div>
       )}
 
-      {/* FILTER BAR (свёрнут в кнопку) */}
-      <CollapsibleFilters
-        label="Фильтры смен"
-        activeCount={
-          (filterCashier ? 1 : 0) + (filterShiftKey ? 1 : 0)
-          + (filterDateFrom ? 1 : 0) + (filterDateTo ? 1 : 0)
-        }
-        onReset={() => {
-          setFilterCashier('');
-          setFilterShiftKey('');
-          setFilterDateFrom('');
-          setFilterDateTo('');
-        }}
-      >
-        <div className={user?.profile?.role === 'operator' ? 'grid grid-cols-1' : 'grid grid-cols-2 gap-3'}>
-          {user?.profile?.role !== 'operator' ? (
-            <Select
-              label="Кассир"
-              value={filterCashier}
-              onChange={(e) => setFilterCashier(e.target.value)}
-              className="h-9 text-xs rounded-xl"
-            >
-              <option value="">Все кассиры</option>
-              {cashiers.map((c) => (
-                <option key={c.id} value={c.user_id}>
-                  {c.full_name || c.email}
-                </option>
-              ))}
-            </Select>
-          ) : null}
-
-          <Input
-            label="№ Смены"
-            placeholder="Поиск по номеру"
-            value={filterShiftKey}
-            onChange={(e) => setFilterShiftKey(e.target.value)}
-            className="h-9 text-xs rounded-xl"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Input
-            label="С даты"
-            type="date"
-            value={filterDateFrom}
-            onChange={(e) => setFilterDateFrom(e.target.value)}
-            className="h-9 text-xs rounded-xl"
-          />
-          <Input
-            label="По дату"
-            type="date"
-            value={filterDateTo}
-            onChange={(e) => setFilterDateTo(e.target.value)}
-            className="h-9 text-xs rounded-xl"
-          />
-        </div>
-      </CollapsibleFilters>
-
       {/* CURRENT SHIFT */}
-      {current && !filterCashier && !filterShiftKey && !filterDateFrom && !filterDateTo ? (
+      {current && !filterCashier && !filterShiftKey && !isOperator ? (
         <CurrentShiftHero
           shift={current}
           report={reportForShift(reportByKey, current)}
@@ -354,7 +293,7 @@ export default function ShiftsScreen() {
 
       {/* HISTORY */}
       <Card className="!p-4">
-        <div className="flex items-start justify-between mb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-line/30 pb-3 mb-3">
           <div className="min-w-0">
             <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft font-bold">
               История смен
@@ -366,59 +305,106 @@ export default function ShiftsScreen() {
               {formatLiters(totals.liters)} · {totals.parts > filteredShifts.length ? `${totals.parts} частей собрано` : 'без разрывов'}
             </div>
           </div>
-          <div className="flex gap-1 flex-shrink-0">
-            {PERIODS.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setPeriod(p.id)}
-                className={
-                  'h-7 px-2.5 rounded-lg text-[11px] font-semibold border transition-colors ' +
-                  (period === p.id
-                    ? 'bg-brand-500 text-white border-brand-500'
-                    : 'bg-bg-elevated text-ink-muted border-line')
-                }
-              >
-                {p.label}
-              </button>
-            ))}
+
+          <div className="flex items-center gap-2 self-end sm:self-center flex-shrink-0">
+            {/* Date Pickers Inline */}
+            <div className="flex items-center gap-1 bg-bg-elevated/45 border border-line/40 rounded-xl px-2 py-1">
+              <span className="text-[9px] text-ink-soft uppercase font-bold">С</span>
+              <input
+                type="date"
+                value={filterDateFrom}
+                onChange={(e) => setFilterDateFrom(e.target.value)}
+                className="bg-transparent text-xs text-ink font-semibold focus:outline-none w-[94px]"
+              />
+              <span className="text-[9px] text-ink-soft uppercase font-bold ml-1">По</span>
+              <input
+                type="date"
+                value={filterDateTo}
+                onChange={(e) => setFilterDateTo(e.target.value)}
+                className="bg-transparent text-xs text-ink font-semibold focus:outline-none w-[94px]"
+              />
+            </div>
+
+            {/* Icon filter button next to it */}
+            <CollapsibleFilters
+              activeCount={(filterCashier ? 1 : 0) + (filterShiftKey ? 1 : 0)}
+              onReset={() => {
+                setFilterCashier('');
+                setFilterShiftKey('');
+              }}
+            >
+              <div className={user?.profile?.role === 'operator' ? 'grid grid-cols-1' : 'grid grid-cols-2 gap-3'}>
+                {user?.profile?.role !== 'operator' ? (
+                  <Select
+                    label="Кассир"
+                    value={filterCashier}
+                    onChange={(e) => setFilterCashier(e.target.value)}
+                    className="h-9 text-xs rounded-xl"
+                  >
+                    <option value="">Все кассиры</option>
+                    {cashiers.map((c) => (
+                      <option key={c.id} value={c.user_id}>
+                        {c.full_name || c.email}
+                      </option>
+                    ))}
+                  </Select>
+                ) : null}
+
+                <Input
+                  label="№ Смены"
+                  placeholder="Поиск по номеру"
+                  value={filterShiftKey}
+                  onChange={(e) => setFilterShiftKey(e.target.value)}
+                  className="h-9 text-xs rounded-xl"
+                />
+              </div>
+            </CollapsibleFilters>
           </div>
         </div>
 
-        {loading ? (
-          <div className="space-y-2">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="h-16 rounded-xl bg-bg-elevated/60 animate-pulse" />
-            ))}
-          </div>
-        ) : filteredShifts.length === 0 ? (
-          <EmptyState
-            icon={ClipboardList}
-            title="За период смен нет"
-            description="Смены появятся когда POS отправит данные в azs_balance."
-          />
-        ) : (
-          <div className="space-y-1.5">
-            {filteredShifts.map((s) => (
-              <ShiftRow
-                key={s.shiftKey}
-                shift={s}
-                report={reportForShift(reportByKey, s)}
-                canReconcile={canReconcile}
-                canRenameOperator={canRenameOperator}
-                onCloseout={() => setCloseoutShift(s)}
-                onOpenReport={() => {
-                  const r = reportForShift(reportByKey, s);
-                  if (r) setViewReport(r);
-                }}
-                onEditReport={() => {
-                  const r = reportForShift(reportByKey, s);
-                  if (r) setEditReport(r);
-                }}
-                onEditOperator={() => setEditingOperator(s)}
+        <div className="relative min-h-[120px]">
+          {loading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-bg-card/60 backdrop-blur-[1px] rounded-xl transition-opacity duration-200">
+              <div className="flex flex-col items-center gap-2">
+                <svg className="animate-spin h-6 w-6 text-brand-500" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span className="text-[10px] uppercase tracking-widest text-ink-muted font-bold">Загрузка смен...</span>
+              </div>
+            </div>
+          )}
+
+          <div className={loading ? 'opacity-40 space-y-1.5 pointer-events-none transition-opacity duration-200' : 'space-y-1.5 transition-opacity duration-200'}>
+            {filteredShifts.length === 0 ? (
+              <EmptyState
+                icon={ClipboardList}
+                title="За период смен нет"
+                description="Смены появятся, когда АСУ отправит данные в систему."
               />
-            ))}
+            ) : (
+              filteredShifts.map((s) => (
+                <ShiftRow
+                  key={s.shiftKey}
+                  shift={s}
+                  report={reportForShift(reportByKey, s)}
+                  canReconcile={canReconcile}
+                  canRenameOperator={canRenameOperator}
+                  onCloseout={() => setCloseoutShift(s)}
+                  onOpenReport={() => {
+                    const r = reportForShift(reportByKey, s);
+                    if (r) setViewReport(r);
+                  }}
+                  onEditReport={() => {
+                    const r = reportForShift(reportByKey, s);
+                    if (r) setEditReport(r);
+                  }}
+                  onEditOperator={() => setEditingOperator(s)}
+                />
+              ))
+            )}
           </div>
-        )}
+        </div>
       </Card>
 
       <CloseoutSheet
@@ -547,7 +533,7 @@ function CurrentShiftHero({ shift, report, canReconcile, canRenameOperator, onCl
           </Button>
         )}
         <div className="rounded-2xl bg-bg-elevated/50 border border-line/40 px-3 py-2 text-[10px] text-ink-muted flex items-center justify-center text-center">
-          Открывается автоматически в POS
+          Открывается автоматически в АСУ
         </div>
       </div>
     </motion.div>
@@ -683,7 +669,10 @@ function PendingCard({ report, reviewing, onApprove, onReject, onOpen }) {
           report.result_status === 'shortage' ? 'danger' :
           report.result_status === 'overage' ? 'warning' : 'info'
         }>
-          {report.result_status ?? 'submitted'}
+          {report.result_status === 'ok' ? 'сошлось' :
+           report.result_status === 'shortage' ? 'недостача' :
+           report.result_status === 'overage' ? 'излишек' :
+           report.result_status === 'rejected' ? 'отклонен' : 'на проверке'}
         </Badge>
       </div>
 
@@ -826,7 +815,7 @@ function CloseoutSheet({ shift, organizationId, stationId, onClose, onDone }) {
         <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
         <div className="text-[11px] text-warning/90 leading-relaxed">
           <span className="font-bold">Слепой ввод.</span>{' '}
-          Введите фактические суммы. Система сама посчитает расхождение с данными POS.
+          Введите фактические суммы. Система сама посчитает расхождение с данными АСУ.
         </div>
       </div>
 
@@ -1160,14 +1149,14 @@ function ReportSheet({ report, onClose }) {
         <div className="text-right relative">
           <span className="text-[9px] text-ink-soft uppercase tracking-wider block">Объем пролива</span>
           <span className="text-sm font-extrabold text-ink mt-0.5 block">{Number(report.expected_liters ?? 0).toLocaleString('ru-RU')} л</span>
-          <span className="text-[9px] text-ink-soft block mt-0.5">Данные из POS счетчиков</span>
+          <span className="text-[9px] text-ink-soft block mt-0.5">Данные из АСУ счетчиков</span>
         </div>
       </div>
 
       {/* 2. Reconciled Revenue Comparison Table */}
       <div className="rounded-2xl border border-line/45 bg-bg-elevated/45 p-3.5 space-y-3">
         <div className="text-[10px] uppercase tracking-wider text-ink-soft font-bold border-b border-line/30 pb-2">
-          Сравнение выручки POS и Факт
+          Сравнение выручки АСУ и Факт
         </div>
 
         <div className="overflow-x-auto">
@@ -1176,7 +1165,7 @@ function ReportSheet({ report, onClose }) {
               <tr className="border-b border-line/30 text-ink-soft font-medium">
                 <th className="pb-2">Метод</th>
                 <th className="pb-2 text-right">Факт</th>
-                <th className="pb-2 text-right">POS</th>
+                <th className="pb-2 text-right">АСУ</th>
                 <th className="pb-2 text-right">Разница</th>
               </tr>
             </thead>
@@ -1323,7 +1312,7 @@ function OperatorSheet({ shift, organizationId, stationId, onClose, onDone }) {
       submitLabel="Сохранить"
     >
       <div className="rounded-2xl bg-bg-elevated border border-line p-3 text-xs text-ink-muted">
-        Оригинальное имя из POS: <span className="text-ink font-medium">{shift.operatorOriginal ?? '—'}</span>
+        Оригинальное имя из АСУ: <span className="text-ink font-medium">{shift.operatorOriginal ?? '—'}</span>
       </div>
       <Input
         label="Скорректированное имя"
@@ -1539,7 +1528,7 @@ export function EditReportSheet({ report, organizationId, stationId, cashiers, o
         </Select>
 
         <div className="rounded-2xl border border-line/50 bg-bg-elevated/40 p-3 space-y-3">
-          <div className="text-[10px] uppercase tracking-wider text-ink-soft font-bold">Ожидалось (из POS)</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-soft font-bold">Ожидалось (из АСУ)</div>
           <div className="grid grid-cols-2 gap-3">
             <Input label="Ожидалось касса" type="number" step="0.01" value={form.expected_cash} onChange={(e) => setForm({ ...form, expected_cash: e.target.value })} />
             <Input label="Ожидалось картой" type="number" step="0.01" value={form.expected_card} onChange={(e) => setForm({ ...form, expected_card: e.target.value })} />

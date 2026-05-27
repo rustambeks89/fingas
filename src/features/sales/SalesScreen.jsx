@@ -133,6 +133,7 @@ export default function SalesScreen() {
   const { user } = useAuth();
   const { canExport } = usePermissions();
   const stationId = user?.profile?.station_id;
+  const isOperator = user?.profile?.role === 'operator';
 
   const [period, setPeriod] = useState('week');
   const [loading, setLoading] = useState(true);
@@ -224,9 +225,9 @@ export default function SalesScreen() {
         <SalesScreenSkeleton />
       ) : (
         <>
-          {currentShift ? (
+          {currentShift && !isOperator ? (
             <LiveSalesCard shift={currentShift} />
-          ) : (
+          ) : !isOperator ? (
             <Card className="relative overflow-hidden border border-line/30 bg-bg-card/50">
               <div className="absolute -top-16 -right-16 w-32 h-32 rounded-full bg-brand-500/5 blur-3xl pointer-events-none" />
               <EmptyState
@@ -236,7 +237,7 @@ export default function SalesScreen() {
                 className="py-10"
               />
             </Card>
-          )}
+          ) : null}
 
           <TopOperatorsCard leaders={leaders} />
 

@@ -5,7 +5,7 @@
 // profileChecked + profileError so the router can show a useful screen when
 // the user is signed in but the public.profiles row / table is missing. Wraps tree in ThemeProvider.
 
-import { createContext, useCallback, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { fetchMyProfile } from '@/services/profileService';
 import { fetchPermissionsMap } from '@/services/permissionService';
@@ -29,6 +29,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [profileChecked, setProfileChecked] = useState(false);
   const [profileError, setProfileError] = useState(null);
+  const currentUserIdRef = useRef(null);
 
   const loadUserData = useCallback(async (sess) => {
     if (!sess?.user?.id) {
@@ -36,6 +37,7 @@ export function AuthProvider({ children }) {
       setPermissions({});
       setProfileChecked(true);
       setProfileError(null);
+      currentUserIdRef.current = null;
       return;
     }
     try {
@@ -46,11 +48,13 @@ export function AuthProvider({ children }) {
       setProfile(p);
       setPermissions(perms);
       setProfileError(null);
+      currentUserIdRef.current = sess.user.id;
     } catch (e) {
       console.error('[Fingas] Failed loading profile/permissions', e);
       setProfile(null);
       setPermissions({});
       setProfileError(e?.message ?? String(e));
+      currentUserIdRef.current = null;
     } finally {
       setProfileChecked(true);
     }
@@ -71,7 +75,10 @@ export function AuthProvider({ children }) {
     });
     const { data: sub } = supabase.auth.onAuthStateChange(async (_e, sess) => {
       setSession(sess ?? null);
-      setProfileChecked(false);
+      const newUserId = sess?.user?.id ?? null;
+      if (newUserId !== currentUserIdRef.current) {
+        setProfileChecked(false);
+      }
       await loadUserData(sess);
     });
     return () => {

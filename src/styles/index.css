@@ -13,7 +13,7 @@
     --color-ink-muted: #475569; /* Slate 600 */
     --color-ink-soft: #94A3B8; /* Slate 400 */
 
-    --color-line: transparent; /* COMPREHENSIVELY REMOVE ALL BORDERS */
+    --color-line: rgba(15, 23, 42, 0.07); /* Delicate crisp light border */
     color-scheme: light;
   }
 
@@ -28,7 +28,7 @@
     --color-ink-muted: #E2E8F0; /* Slate 200 - ultra-clear and highly legible on navy backgrounds */
     --color-ink-soft: #94A3B8; /* Slate 400 */
 
-    --color-line: transparent; /* COMPREHENSIVELY REMOVE ALL BORDERS */
+    --color-line: rgba(255, 255, 255, 0.08); /* Delicate crisp dark border (Apple-style) */
     color-scheme: dark;
   }
 
@@ -85,45 +85,58 @@
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
   }
 
-  /* Force all borders in elements utilizing border classes to transparent */
-  .border,
-  .border-b,
-  .border-t,
-  .border-l,
-  .border-r,
-  [class*="border-line"],
-  [class*="border-white/"],
-  [class*="border-brand-500/"] {
-    border-color: transparent !important;
+  /* Subtle thin borders using the theme-defined light/dark variables */
+  .border {
+    border: 1px solid var(--color-line);
   }
-
-  .dark .border-transparent,
-  .border-transparent {
-    border-color: transparent !important;
+  .border-b {
+    border-bottom: 1px solid var(--color-line);
+  }
+  .border-t {
+    border-top: 1px solid var(--color-line);
+  }
+  .border-l {
+    border-left: 1px solid var(--color-line);
+  }
+  .border-r {
+    border-right: 1px solid var(--color-line);
   }
 
   /* Styling inputs and textareas to be borderless and relying on clean background tins */
   input,
   select,
   textarea {
-    border: none !important;
-    background: rgba(15, 23, 42, 0.04) !important;
+    border: 1px solid rgba(15, 23, 42, 0.06) !important;
+    background: rgba(15, 23, 42, 0.03) !important;
     box-shadow: none !important;
+    transition: all 180ms ease;
   }
 
   .dark input,
   .dark select,
   .dark textarea {
-    border: none !important;
-    background: rgba(14, 22, 42, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    background: rgba(14, 22, 42, 0.4) !important;
     box-shadow: none !important;
+    transition: all 180ms ease;
   }
 
   input:focus,
   select:focus,
   textarea:focus {
     outline: none !important;
-    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2) !important;
+    border-color: rgba(239, 68, 68, 0.45) !important;
+    box-shadow: 0 0 0 2.5px rgba(239, 68, 68, 0.2) !important;
+    background: rgba(15, 23, 42, 0.01) !important;
+  }
+
+  .dark input:focus,
+  .dark select:focus,
+  .dark textarea:focus {
+    outline: none !important;
+    border-color: rgba(239, 68, 68, 0.55) !important;
+    box-shadow: 0 0 0 2.5px rgba(239, 68, 68, 0.25) !important;
+    background: rgba(14, 22, 42, 0.5) !important;
   }
   
   .no-scrollbar::-webkit-scrollbar { display: none; }

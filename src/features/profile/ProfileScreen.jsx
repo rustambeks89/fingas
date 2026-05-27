@@ -198,19 +198,6 @@ export default function ProfileScreen() {
         </div>
       </Card>
 
-      {/* OPERATOR SALARY */}
-      {isOperator && (
-        <Card className="mt-3">
-          <div className="font-semibold mb-2">Моя зарплата</div>
-          <div className="grid grid-cols-2 gap-3">
-            <Stat label="Ставка/смена" value={p?.fixed_shift_rate != null ? formatMoney(p.fixed_shift_rate) : '—'} />
-            <Stat label="Цена за литр" value={p?.liter_rate != null ? formatMoney(p.liter_rate, 'сом/л') : '—'} />
-          </div>
-          <div className="text-xs text-ink-soft mt-3">
-            Ставку задаёт владелец. Начисления появятся после первой закрытой смены.
-          </div>
-        </Card>
-      )}
 
       {/* PERSONAL + PASSWORD */}
       <Card className="mt-3 space-y-3 rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl">

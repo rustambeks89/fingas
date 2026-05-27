@@ -192,16 +192,13 @@ export async function createDirectThread(targetUserId) {
 
   if (threadError) throw threadError;
 
-  // Добавляем участников через upsert чтобы не упасть при дублировании
+  // Добавляем участников через insert. Поскольку тред новый, дубликаты невозможны, и это обходит проблемы с RLS UPDATE.
   const { error: partError } = await supabase
     .from('chat_participants')
-    .upsert(
-      [
-        { thread_id: thread.id, user_id: userId },
-        { thread_id: thread.id, user_id: targetUserId },
-      ],
-      { onConflict: 'thread_id,user_id', ignoreDuplicates: true }
-    );
+    .insert([
+      { thread_id: thread.id, user_id: userId },
+      { thread_id: thread.id, user_id: targetUserId },
+    ]);
 
   if (partError) {
     // Откатываем тред если участников добавить не удалось

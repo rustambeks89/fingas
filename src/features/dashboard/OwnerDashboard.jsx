@@ -68,9 +68,7 @@ const PERIODS = [
 const REPORTS = [
   { to: '/shifts',          label: 'Сменный отчёт',         icon: ClipboardList, desc: 'Смены · сверка · расхождения' },
   { to: '/pl',              label: 'P&L',                   icon: TrendingUp,    desc: 'Выручка · себест. · маржа' },
-  { to: '/employees',       label: 'Сотрудники',            icon: Users,         desc: 'Карточки · ставки · выплаты' },
   { to: '/counterparties',  label: 'Контрагенты',           icon: Users,         desc: 'Сальдо · долги · поставщики' },
-  { to: '/cashflow',        label: 'Кэшфлоу',               icon: Wallet,        desc: 'Приход · расход · поток' },
   { to: '/taxes',           label: 'Налоги',                icon: Receipt,       desc: 'Платежи и периоды' },
   { to: '/documents',       label: 'Документы',             icon: FileText,      desc: 'Накладные · чеки · акты' },
 ];
@@ -284,7 +282,7 @@ export default function OwnerDashboard() {
       if (collected.requests > 0) {
         a.push({ tone: 'info', icon: Users,
           title: `Заявок сотрудников: ${collected.requests}`,
-          desc: 'Ожидают одобрения', to: '/employees' });
+          desc: 'Ожидают одобрения', to: '/counterparties?filter=employee' });
       }
       if (collected.collTotal > 0) {
         a.push({ tone: 'info', icon: Wallet,
@@ -466,6 +464,11 @@ export default function OwnerDashboard() {
         </div>
       )}
 
+      {/* CHAT WIDGET */}
+      <Suspense fallback={null}>
+        <DashboardChatCard />
+      </Suspense>
+
       {/* TANKS RESERVOIRS STATUS PANEL */}
       <Card className="!p-4 shadow-card border border-line/30 bg-bg-card/75 backdrop-blur-2xl">
         <SectionTitle
@@ -509,11 +512,6 @@ export default function OwnerDashboard() {
           </div>
         )}
       </Card>
-
-      {/* CHAT WIDGET */}
-      <Suspense fallback={null}>
-        <DashboardChatCard />
-      </Suspense>
 
       {/* QUICK REPORTS TILES PANEL */}
       <Card className="!p-4 shadow-card border border-line/30 bg-bg-card/75 backdrop-blur-2xl">

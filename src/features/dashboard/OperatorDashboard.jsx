@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/hooks/useAuth';
 import { formatMoney, formatDateTime } from '@/lib/formatters';
 import { getCurrentOpenShift } from '@/services/shiftService';
+import DashboardChatCard from './DashboardChatCard';
 
 
 export default function OperatorDashboard() {
@@ -118,6 +119,8 @@ export default function OperatorDashboard() {
           <ChevronRight className="w-3.5 h-3.5 text-ink-soft flex-shrink-0" />
         </Card>
       </Link>
+
+      <DashboardChatCard />
     </div>
   );
 }

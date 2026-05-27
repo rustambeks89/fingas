@@ -81,7 +81,7 @@ export default function EmployeePermissionsScreen() {
         organizationId: me?.profile?.organization_id,
         rows,
       });
-      navigate('/employees');
+      navigate('/counterparties?filter=employee');
     } finally {
       setSaving(false);
     }

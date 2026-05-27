@@ -484,7 +484,7 @@ export default function TankMeasurementsScreen() {
                     </div>
                   ) : (
                     <div className="text-xs text-ink-soft bg-bg-soft rounded-xl p-2.5 text-center">
-                      Синхронизированные данные azs_balance для {fuelType} пока не найдены в системе.
+                      Синхронизированные данные АСУ для {fuelType} пока не найдены в системе.
                     </div>
                   )}
                 </Card>

@@ -34,11 +34,10 @@ import { supabase } from '@/lib/supabaseClient';
 const TABS = [
   { id: 'requests',    label: 'Заявки',          status: PROFILE_STATUS.PENDING },
   { id: 'active',      label: 'Активные',        status: PROFILE_STATUS.ACTIVE },
-  { id: 'permissions', label: 'Доступы',         status: PROFILE_STATUS.ACTIVE },
   { id: 'blocked',     label: 'Заблокированные', status: PROFILE_STATUS.BLOCKED },
 ];
 
-export default function EmployeesScreen() {
+export default function EmployeesScreen({ embedded = false } = {}) {
   const { user } = useAuth();
   const orgId = user?.profile?.organization_id;
   const [tab, setTab] = useState('active');
@@ -140,10 +139,12 @@ export default function EmployeesScreen() {
 
   return (
     <div>
-      <ScreenHeader
-        title="Сотрудники"
-        subtitle={`${counts.active} активных${counts.requests ? ` · ${counts.requests} заявок` : ''}${counts.blocked ? ` · ${counts.blocked} заблокированных` : ''}`}
-      />
+      {!embedded && (
+        <ScreenHeader
+          title="Сотрудники"
+          subtitle={`${counts.active} активных${counts.requests ? ` · ${counts.requests} заявок` : ''}${counts.blocked ? ` · ${counts.blocked} заблокированных` : ''}`}
+        />
+      )}
 
       {/* Quick switcher — компактно, без больших карточек статистики */}
       {(counts.requests > 0 || counts.blocked > 0) && (
@@ -201,69 +202,58 @@ export default function EmployeesScreen() {
           />
         )}
 
-        {!loading && rows.map((p, i) => (
-          <motion.div
-            key={p.id}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.03 }}
-        >
-            <Card className="rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl">
-              <div className="flex items-center gap-3">
-                <Avatar name={p.full_name} src={p.avatar_url} />
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-ink truncate">
-                    {p.full_name || p.email}
-                  </div>
-                  <div className="text-xs text-ink-muted truncate">
-                    {ROLE_LABELS[p.role] ?? p.role}
-                    {p.station?.name ? ` · ${p.station.name}` : ''}
-                  </div>
-                  <div className="text-[11px] text-ink-soft truncate">{p.email}{p.phone ? ` · ${p.phone}` : ''}</div>
+        {!loading && rows.map((p, i) => {
+          const isClickable = (tab === 'active' || tab === 'blocked') && p.user_id;
+          const cardContent = (
+            <div className="flex items-center gap-3">
+              <Avatar name={p.full_name} src={p.avatar_url} />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-ink truncate">
+                  {p.full_name || p.email}
                 </div>
-                <Badge tone={
-                  p.status === 'active' ? 'success' :
-                  p.status === 'blocked' ? 'danger' :
-                  p.status === 'rejected' ? 'warning' : 'info'
-                }>
-                  {PROFILE_STATUS_LABELS[p.status] ?? p.status}
-                </Badge>
+                <div className="text-xs text-ink-muted truncate">
+                  {ROLE_LABELS[p.role] ?? p.role}
+                  {p.station?.name ? ` · ${p.station.name}` : ''}
+                </div>
+                <div className="text-[11px] text-ink-soft truncate">{p.email}{p.phone ? ` · ${p.phone}` : ''}</div>
               </div>
+              <Badge tone={
+                p.status === 'active' ? 'success' :
+                p.status === 'blocked' ? 'danger' :
+                p.status === 'rejected' ? 'warning' : 'info'
+              }>
+                {PROFILE_STATUS_LABELS[p.status] ?? p.status}
+              </Badge>
+            </div>
+          );
 
-              {tab === 'requests' && (
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <Button size="sm" onClick={() => setApproveFor(p)}>Одобрить</Button>
-                  <Button size="sm" variant="secondary" onClick={() => reject(p)}>Отклонить</Button>
-                </div>
-              )}
-              {tab === 'active' && p.role !== 'owner' && (
-                <div className="space-y-2 mt-3">
-                  {p.role === 'operator' && p.user_id && (
-                    <Link to={`/employees/${p.user_id}`} className="block">
-                      <Button size="sm" variant="brand" className="w-full h-8 text-[11px] font-bold rounded-xl">
-                        Перейти к карточке →
-                      </Button>
-                    </Link>
-                  )}
-                  <div className="grid grid-cols-2 gap-2">
-                    <Link to={`/employees/${p.user_id}/permissions`} className="w-full">
-                      <Button size="sm" variant="secondary" className="w-full h-8 text-[11px] rounded-xl">Доступы</Button>
-                    </Link>
-                    <Button size="sm" variant="danger" className="w-full h-8 text-[11px] rounded-xl" onClick={() => block(p)}>Заблокировать</Button>
-                  </div>
-                </div>
-              )}
-              {tab === 'permissions' && p.role !== 'owner' && (
-                <Link to={`/employees/${p.user_id}/permissions`} className="block mt-3">
-                  <Button size="sm" variant="secondary" className="w-full">Открыть toggles →</Button>
+          return (
+            <motion.div
+              key={p.id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.03 }}
+            >
+              {isClickable ? (
+                <Link to={`/employees/${p.user_id}`} className="block">
+                  <Card hoverable className="rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl hover:border-brand-500/40 transition-colors">
+                    {cardContent}
+                  </Card>
                 </Link>
+              ) : (
+                <Card className="rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl">
+                  {cardContent}
+                  {tab === 'requests' && (
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      <Button size="sm" onClick={() => setApproveFor(p)}>Одобрить</Button>
+                      <Button size="sm" variant="secondary" onClick={() => reject(p)}>Отклонить</Button>
+                    </div>
+                  )}
+                </Card>
               )}
-              {tab === 'blocked' && (
-                <Button size="sm" className="mt-3 w-full" onClick={() => unblock(p)}>Разблокировать</Button>
-              )}
-            </Card>
-          </motion.div>
-        ))}
+            </motion.div>
+          );
+        })}
       </div>
 
       <EmployeePayrollSheet

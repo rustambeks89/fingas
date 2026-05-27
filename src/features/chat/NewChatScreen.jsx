@@ -43,15 +43,27 @@ export default function NewChatScreen() {
     listEmployees({ organizationId, status: 'active' })
       .then((list) => {
         const myRole = user?.profile?.role;
-        const normalized = (list ?? []).filter((e) => e.user_id !== user?.id);
-        const filteredList = normalized.filter((e) => {
+        const myStationId = user?.profile?.station_id;
+
+        const normalized = (list ?? []).filter((e) => {
+          // Исключаем себя из списка получателей
+          if (e.user_id === user?.id) return false;
+
+          // Владелец организации видит всех
           if (myRole === ROLES.OWNER) return true;
-          if (myRole === ROLES.ADMIN) {
-            return e.station_id === stationId || e.role === ROLES.OWNER;
-          }
-          return e.role === ROLES.OWNER || (e.role === ROLES.ADMIN && e.station_id === stationId);
+
+          // Любой сотрудник может написать владельцу (руководству)
+          if (e.role === ROLES.OWNER) return true;
+
+          // Сотрудники видят только коллег со своей АЗС
+          if (myStationId && e.station_id === myStationId) return true;
+
+          // Если у текущего пользователя нет привязки к конкретной АЗС (например, центральный бухгалтер), он видит всех
+          if (!myStationId) return true;
+
+          return false;
         });
-        setEmployees(filteredList);
+        setEmployees(normalized);
       })
       .catch((e) => {
         console.error('[Fingas NewChatScreen] Error fetching employees', e);
@@ -247,7 +259,7 @@ export default function NewChatScreen() {
             description={
               searchQuery
                 ? 'Измените поисковый запрос.'
-                : 'Нет доступных сотрудников для переписки согласно вашей роли.'
+                : 'Нет доступных сотрудников для переписки согласно вашей роли. Если вы вошли под ролью кассира/оператора, убедитесь, что применили новый SQL-запрос для обновления политик RLS таблицы профилей (0033_profiles_visibility_rls.sql) в Supabase Editor.'
             }
           />
         ) : (

@@ -5,7 +5,7 @@
 // detail page (existing /suppliers/:id) which has full ledger.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowUpRight,
@@ -29,6 +29,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
 import { formatMoney, formatPhone } from '@/lib/formatters';
 import { downloadCSV, todayStamp } from '@/lib/exporters';
+import EmployeesScreen from '@/features/employees/EmployeesScreen';
 
 const FILTERS = [
   { id: 'all',      label: 'Все' },
@@ -55,7 +56,11 @@ export default function CounterpartiesReportScreen() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filter = searchParams.get('filter') ?? 'all';
+  const setFilter = (val) => {
+    setSearchParams({ filter: val });
+  };
   const [query, setQuery] = useState('');
 
   const reload = useCallback(async () => {
@@ -137,32 +142,36 @@ export default function CounterpartiesReportScreen() {
       )}
 
       {/* SUMMARY */}
-      <div className="grid grid-cols-2 gap-2">
-        <SummaryTile
-          tone="warning"
-          label="Мы должны"
-          value={loading ? '…' : formatMoney(summary.owe)}
-          hint={`${summary.suppliers} поставщиков`}
-        />
-        <SummaryTile
-          tone="success"
-          label="Должны нам"
-          value={loading ? '…' : formatMoney(summary.receivable)}
-          hint={`${summary.customers} клиентов`}
-        />
-      </div>
+      {filter !== 'employee' && (
+        <div className="grid grid-cols-2 gap-2">
+          <SummaryTile
+            tone="warning"
+            label="Мы должны"
+            value={loading ? '…' : formatMoney(summary.owe)}
+            hint={`${summary.suppliers} поставщиков`}
+          />
+          <SummaryTile
+            tone="success"
+            label="Должны нам"
+            value={loading ? '…' : formatMoney(summary.receivable)}
+            hint={`${summary.customers} клиентов`}
+          />
+        </div>
+      )}
 
       {/* SEARCH + FILTERS */}
       <div className="space-y-2">
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-soft pointer-events-none" />
-          <Input
-            placeholder="Поиск по названию / ИНН / телефону"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="!pl-9"
-          />
-        </div>
+        {filter !== 'employee' && (
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-soft pointer-events-none" />
+            <Input
+              placeholder="Поиск по названию / ИНН / телефону"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="!pl-9"
+            />
+          </div>
+        )}
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1">
           {FILTERS.map((f) => (
             <button
@@ -182,7 +191,9 @@ export default function CounterpartiesReportScreen() {
       </div>
 
       {/* LIST */}
-      {loading ? (
+      {filter === 'employee' ? (
+        <EmployeesScreen embedded={true} />
+      ) : loading ? (
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
             <div key={i} className="h-20 rounded-2xl bg-bg-card border border-line/40 animate-pulse" />
@@ -213,9 +224,11 @@ export default function CounterpartiesReportScreen() {
         </div>
       )}
 
-      <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft text-center pt-1">
-        {filtered.length} из {summary.total}
-      </div>
+      {filter !== 'employee' && (
+        <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft text-center pt-1">
+          {filtered.length} из {summary.total}
+        </div>
+      )}
     </div>
   );
 }

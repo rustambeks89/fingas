@@ -197,26 +197,9 @@ export default function SettingsScreen() {
         )}
       </Card>
 
-      {/* EMPLOYEES */}
-      <Link to="/employees" className="block mt-3 active:scale-[0.99] transition-transform">
-        <Card hoverable className="p-5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-bg-elevated border border-line/50 flex items-center justify-center text-brand-500 flex-shrink-0">
-                <Users className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="font-semibold text-ink">Сотрудники</div>
-                <div className="text-xs text-ink-muted truncate">Управление командой и приглашениями</div>
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-ink-soft flex-shrink-0" />
-          </div>
-        </Card>
-      </Link>
 
       {/* PERMISSIONS */}
-      <Link to="/employees" className="block mt-3 active:scale-[0.99] transition-transform">
+      <Link to="/counterparties?filter=employee" className="block mt-3 active:scale-[0.99] transition-transform">
         <Card hoverable className="p-5">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
@@ -486,7 +469,7 @@ function StationSheet({ open, organizationId, station, onClose, onSaved, canDele
         label="ShopKey / External station ID"
         type="number"
         placeholder="8"
-        hint="ID станции в MySQL (azs_selling.ShopKey, azs_balance.ShopKey). Нужно для привязки данных продаж и остатков к этой АЗС."
+        hint="Уникальный идентификатор АЗС в кассовой системе. Необходим для автоматического связывания данных о продажах и остатках топлива."
         value={form.external_station_id}
         onChange={(e) => setForm({ ...form, external_station_id: e.target.value })}
       />

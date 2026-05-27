@@ -136,7 +136,7 @@ export function AppRouter() {
         <Route path="pl" element={<ModuleRoute module={MODULES.PL}><PLScreen /></ModuleRoute>} />
         <Route path="documents" element={<ModuleRoute module={MODULES.DOCUMENTS}><DocumentsScreen /></ModuleRoute>} />
         <Route path="notifications" element={<ModuleRoute module={MODULES.NOTIFICATIONS}><NotificationsScreen /></ModuleRoute>} />
-        <Route path="employees" element={<ModuleRoute module={MODULES.EMPLOYEES}><EmployeesScreen /></ModuleRoute>} />
+        <Route path="employees" element={<Navigate to="/counterparties?filter=employee" replace />} />
         <Route path="employees/:userId" element={<ModuleRoute module={MODULES.EMPLOYEES}><EmployeeDetailScreen /></ModuleRoute>} />
         <Route path="employees/:userId/permissions" element={<ModuleRoute module={MODULES.EMPLOYEES}><EmployeePermissionsScreen /></ModuleRoute>} />
         <Route path="settings" element={<ModuleRoute module={MODULES.SETTINGS}><SettingsScreen /></ModuleRoute>} />

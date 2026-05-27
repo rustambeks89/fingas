@@ -26,23 +26,22 @@ export function CollapsibleFilters({
           type="button"
           onClick={() => setOpen((v) => !v)}
           className={
-            'flex items-center gap-1.5 h-9 px-3 rounded-2xl border text-xs font-semibold transition-colors ' +
+            'relative flex items-center justify-center w-9 h-9 rounded-xl border transition-colors ' +
             (open || activeCount > 0
-              ? 'border-brand-500/40 bg-brand-500/10 text-ink'
-              : 'border-line bg-bg-card text-ink-muted hover:text-ink hover:border-brand-500/30')
+              ? 'border-brand-500/45 bg-brand-500/10 text-brand-400'
+              : 'border-line/45 bg-bg-card text-ink-muted hover:text-ink hover:border-brand-500/30')
           }
+          title="Фильтры"
         >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          <span>{label}</span>
+          <SlidersHorizontal className="w-4 h-4" />
           {activeCount > 0 && (
-            <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-brand-500 text-white">
+            <span className="absolute -top-1.5 -right-1.5 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-black bg-brand-500 text-white shadow-sm">
               {activeCount}
             </span>
           )}
-          <ChevronDown className={'w-3.5 h-3.5 transition-transform ' + (open ? 'rotate-180' : '')} />
         </button>
         {activeCount > 0 && onReset && (
-          <Button size="sm" variant="ghost" className="h-9 px-2.5 text-[11px]" onClick={onReset}>
+          <Button size="sm" variant="ghost" className="h-9 px-2 text-[11px]" onClick={onReset}>
             <X className="w-3.5 h-3.5" />
             Сбросить
           </Button>

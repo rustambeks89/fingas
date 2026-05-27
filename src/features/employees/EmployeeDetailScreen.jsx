@@ -9,7 +9,7 @@
 //   • Ставка     — текущая ставка + редактор
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -35,11 +35,11 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES, ROLE_LABELS } from '@/lib/constants';
 import { formatDate, formatDateTime, formatLiters, formatMoney } from '@/lib/formatters';
 import {
-  accruePayrollForReport,
   getEmployeePayRate,
   listPayroll,
   saveEmployeePayRate,
 } from '@/services/payrollService';
+import { blockEmployee, unblockEmployee } from '@/services/profileService';
 import { EditReportSheet } from '@/features/shifts/ShiftsScreen';
 
 const TABS = [
@@ -81,10 +81,8 @@ export default function EmployeeDetailScreen({ forcedUserId = null } = {}) {
   const [activeTab, setActiveTab] = useState('shifts');
   const [editingRate, setEditingRate] = useState(false);
   const [payoutOpen, setPayoutOpen] = useState(false);
-  const [accrualOpen, setAccrualOpen] = useState(false);
   const [editingReport, setEditingReport] = useState(null);
   const [cashiers, setCashiers] = useState([]);
-  const [accruing, setAccruing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
@@ -144,24 +142,67 @@ export default function EmployeeDetailScreen({ forcedUserId = null } = {}) {
 
   useEffect(() => { reload(); }, [reload]);
 
-  // Прогнать все утверждённые сменные отчёты этого сотрудника через RPC
-  // начисления. Полезно когда смены утвердили ДО назначения ставки, или
-  // если автотриггер из 0028 не сработал.
-  async function recomputeAccruals() {
-    const approved = shifts.filter((s) => s.approved_at && s.result_status !== 'rejected');
-    if (approved.length === 0) { setErr('Нет утверждённых смен для начисления.'); return; }
-    setAccruing(true); setErr('');
+  // Удалить выплату — каскадно с парной cashflow-операцией.
+  async function deletePayout(row) {
+    if (!row) return;
+    const msg = row.cashflow_id
+      ? 'Удалить выплату? Связанная операция в кэшфлоу тоже исчезнет.'
+      : 'Удалить выплату?';
+    if (!confirm(msg)) return;
+    setErr('');
     try {
-      for (const r of approved) {
-        try { await accruePayrollForReport(r.id); } catch (e) { console.warn('[employee] accrue failed', r.id, e); }
+      if (row.cashflow_id) {
+        // Удаление cashflow триггерно подчистит payroll (миграция 0030).
+        const { data, error: cfErr } = await supabase
+          .from('cashflow')
+          .delete()
+          .eq('id', row.cashflow_id)
+          .select('id');
+        if (cfErr) throw cfErr;
+        if (!data || data.length === 0) {
+          throw new Error('Удаление заблокировано (нет прав cashflow.can_delete).');
+        }
+      } else {
+        // Старые выплаты без cashflow_id — просто удаляем payroll-строку.
+        const { data, error: prErr } = await supabase
+          .from('payroll')
+          .delete()
+          .eq('id', row.id)
+          .select('id');
+        if (prErr) throw prErr;
+        if (!data || data.length === 0) {
+          throw new Error('Удаление заблокировано (нет прав payroll.can_delete или миграция 0031 не применена).');
+        }
       }
       await reload();
     } catch (e) {
-      setErr(e?.message ?? 'Не удалось пересчитать начисления');
-    } finally {
-      setAccruing(false);
+      setErr(e?.message ?? 'Не удалось удалить выплату');
     }
   }
+
+  async function blockThisEmployee() {
+    if (!profile) return;
+    if (!confirm(`Заблокировать ${profile.full_name || profile.email}?`)) return;
+    setErr('');
+    try {
+      await blockEmployee(profile.id);
+      setProfile((p) => p ? { ...p, status: 'blocked' } : p);
+    } catch (e) {
+      setErr(e?.message ?? 'Не удалось заблокировать');
+    }
+  }
+
+  async function unblockThisEmployee() {
+    if (!profile) return;
+    setErr('');
+    try {
+      await unblockEmployee(profile.id);
+      setProfile((p) => p ? { ...p, status: 'active' } : p);
+    } catch (e) {
+      setErr(e?.message ?? 'Не удалось разблокировать');
+    }
+  }
+
 
   const totals = useMemo(() => {
     const accrued = payroll.reduce((s, r) => s + Number(r.accrued ?? 0), 0);
@@ -175,6 +216,16 @@ export default function EmployeeDetailScreen({ forcedUserId = null } = {}) {
   const paidPct = totals.accrued > 0
     ? Math.max(0, Math.min(100, (totals.paid / totals.accrued) * 100))
     : 0;
+
+  if (loading && !profile) {
+    return (
+      <div className="space-y-3 pb-3 animate-pulse">
+        <div className="h-6 w-20 bg-bg-card rounded-xl border border-line/30" />
+        <Card className="h-44 bg-bg-card rounded-2xl border border-line/30" />
+        <Card className="h-64 bg-bg-card rounded-2xl border border-line/30" />
+      </div>
+    );
+  }
 
   if (!profile && !loading) {
     return (
@@ -214,6 +265,34 @@ export default function EmployeeDetailScreen({ forcedUserId = null } = {}) {
               <span>{ROLE_LABELS[profile?.role] ?? profile?.role ?? '—'}</span>
               {stationName && <span>· {stationName}</span>}
             </div>
+            {user?.profile?.role === 'owner' && profile && profile.role !== 'owner' && (
+              <div className="mt-2.5 flex gap-1.5 flex-wrap">
+                <Link to={`/employees/${profile?.user_id}/permissions`}>
+                  <Button size="sm" variant="brand" className="h-7 text-[10px] px-2.5 rounded-lg font-bold text-white shadow-sm">
+                    Доступы
+                  </Button>
+                </Link>
+                {profile?.status === 'active' ? (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    className="h-7 text-[10px] px-2.5 rounded-lg font-bold text-white shadow-sm"
+                    onClick={blockThisEmployee}
+                  >
+                    Заблокировать
+                  </Button>
+                ) : profile?.status === 'blocked' ? (
+                  <Button
+                    size="sm"
+                    variant="success"
+                    className="h-7 text-[10px] px-2.5 rounded-lg font-bold bg-success/10 border-success/30 hover:bg-success/25 text-success"
+                    onClick={unblockThisEmployee}
+                  >
+                    Разблокировать
+                  </Button>
+                ) : null}
+              </div>
+            )}
           </div>
           <div className="flex flex-col items-end gap-1.5">
             <Badge tone={totals.remaining > 0 ? 'warning' : 'success'}>
@@ -251,20 +330,27 @@ export default function EmployeeDetailScreen({ forcedUserId = null } = {}) {
         </div>
       </Card>
 
-      {/* DATE RANGE FILTER (свёрнут в кнопку) */}
-      <CollapsibleFilters
-        label={fromDate || toDate ? `${fromDate || '—'} → ${toDate || '—'}` : 'Период'}
-        activeCount={(fromDate ? 1 : 0) + (toDate ? 1 : 0)}
-        onReset={() => { setFromDate(''); setToDate(''); }}
-      >
-        <DateRangeFilter
-          fromDate={fromDate}
-          toDate={toDate}
-          onFromChange={setFromDate}
-          onToChange={setToDate}
-          onPreset={(f, t) => { setFromDate(f); setToDate(t); }}
-        />
-      </CollapsibleFilters>
+      {/* DATE RANGE FILTER — 2 direct fields С and По, styled as luxury inline inputs */}
+      <div className="grid grid-cols-2 gap-2.5 my-1">
+        <div className="relative flex items-center h-10 px-3.5 rounded-2xl bg-bg-card border border-line/45 backdrop-blur-xl">
+          <span className="text-[10px] font-black text-ink-soft uppercase mr-2 select-none">С</span>
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="w-full h-full bg-transparent text-xs font-bold text-ink focus:outline-none text-right cursor-pointer"
+          />
+        </div>
+        <div className="relative flex items-center h-10 px-3.5 rounded-2xl bg-bg-card border border-line/45 backdrop-blur-xl">
+          <span className="text-[10px] font-black text-ink-soft uppercase mr-2 select-none">По</span>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="w-full h-full bg-transparent text-xs font-bold text-ink focus:outline-none text-right cursor-pointer"
+          />
+        </div>
+      </div>
 
       {/* TABS */}
       <div className="flex gap-1 p-1 rounded-2xl bg-bg-card border border-line/30">
@@ -308,15 +394,6 @@ export default function EmployeeDetailScreen({ forcedUserId = null } = {}) {
             <Button size="sm" onClick={() => setPayoutOpen(true)}>
               <Plus className="w-4 h-4" /> Выплата
             </Button>
-          ) : activeTab === 'accruals' && canManageRate ? (
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="secondary" onClick={recomputeAccruals} loading={accruing}>
-                Пересчитать
-              </Button>
-              <Button size="sm" onClick={() => setAccrualOpen(true)}>
-                <Plus className="w-4 h-4" /> Начислить
-              </Button>
-            </div>
           ) : null}
         </div>
 
@@ -338,7 +415,7 @@ export default function EmployeeDetailScreen({ forcedUserId = null } = {}) {
             ) : activeTab === 'accruals' ? (
               <AccrualsList payroll={payroll} />
             ) : activeTab === 'payouts' ? (
-              <PayoutsList payroll={payroll} />
+              <PayoutsList payroll={payroll} canDelete={canManageRate} onDelete={deletePayout} />
             ) : (
               <RateSummary rate={rate} canEdit={canManageRate} />
             )}
@@ -364,15 +441,6 @@ export default function EmployeeDetailScreen({ forcedUserId = null } = {}) {
         employeeName={profile?.full_name || profile?.email || 'сотруднику'}
         onClose={() => setPayoutOpen(false)}
         onSaved={async () => { setPayoutOpen(false); await reload(); }}
-      />
-
-      <AccrualSheet
-        open={accrualOpen}
-        userId={userId}
-        organizationId={orgId}
-        stationId={profile?.station_id}
-        onClose={() => setAccrualOpen(false)}
-        onSaved={async () => { setAccrualOpen(false); await reload(); }}
       />
 
       <EditReportSheet
@@ -403,13 +471,18 @@ function ShiftsList({ shifts, canEdit, onShiftClick }) {
     const sub = r.external_shift_key != null
       ? `Смена #${r.external_shift_key}${diff !== 0 ? ' · ' + (diff >= 0 ? '+' : '−') + formatMoney(Math.abs(diff)) : ''}`
       : (diff !== 0 ? (diff >= 0 ? '+' : '−') + formatMoney(Math.abs(diff)) : '—');
+    const statusLabel =
+      r.result_status === 'ok' ? 'сошлось' :
+      r.result_status === 'shortage' ? 'недостача' :
+      r.result_status === 'overage' ? 'излишек' :
+      r.result_status === 'rejected' ? 'отклонен' : (r.result_status ?? 'сошлось');
     return (
       <Row
         key={r.id}
         date={r.submitted_at}
         title={formatMoney(r.actual_total)}
         sub={sub}
-        right={<Badge tone={tone}>{r.approved_at ? (r.result_status ?? 'ok') : 'ждёт'}</Badge>}
+        right={<Badge tone={tone}>{r.approved_at ? statusLabel : 'ждёт'}</Badge>}
         onClick={canEdit ? () => onShiftClick?.(r) : undefined}
       />
     );
@@ -435,7 +508,7 @@ function AccrualsList({ payroll }) {
   ));
 }
 
-function PayoutsList({ payroll }) {
+function PayoutsList({ payroll, canDelete, onDelete }) {
   const paidRows = payroll.filter((r) => Number(r.paid ?? 0) > 0);
   if (paidRows.length === 0) {
     return <EmptyState icon={Wallet} title="Выплат нет" description="Добавьте выплату, когда передаёте деньги сотруднику." />;
@@ -445,8 +518,9 @@ function PayoutsList({ payroll }) {
       key={r.id}
       date={r.paid_at ?? r.period}
       title={formatMoney(r.paid)}
-      sub={r.note ?? '—'}
+      sub={(r.note ?? '—') + (r.cashflow_id ? ' · кэшфлоу' : '')}
       right={<Badge tone="success">выплачено</Badge>}
+      onClick={canDelete ? () => onDelete?.(r) : undefined}
     />
   ));
 }
@@ -801,78 +875,6 @@ function PayoutSheet({ open, userId, organizationId, stationId, currentBalance, 
       <div className="text-[11px] text-ink-soft">
         Создаст расход в кэшфлоу (категория «Зарплата») с выбранного кошелька
         и привяжет к этой выплате запись в payroll.
-      </div>
-    </FormSheet>
-  );
-}
-
-function AccrualSheet({ open, userId, organizationId, stationId, onClose, onSaved }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(today);
-  const [note, setNote] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState('');
-
-  useEffect(() => {
-    if (open) {
-      setAmount('');
-      setDate(today);
-      setNote('');
-      setErr('');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  async function submit() {
-    setSaving(true); setErr('');
-    try {
-      const amt = Number(amount);
-      if (!amt || amt <= 0) throw new Error('Сумма должна быть > 0');
-      const { error } = await supabase
-        .from('payroll')
-        .insert({
-          organization_id: organizationId,
-          station_id: stationId ?? null,
-          user_id: userId,
-          period: date,
-          salary_type: 'fixed',
-          accrued: amt,
-          paid: 0,
-          note: note || 'Ручное начисление',
-        });
-      if (error) throw error;
-      onSaved?.();
-    } catch (e) {
-      setErr(e?.message ?? 'Не удалось сохранить');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <FormSheet
-      open={open}
-      onClose={onClose}
-      title="Начисление сотруднику"
-      onSubmit={submit}
-      saving={saving}
-      error={err}
-      submitLabel="Начислить"
-    >
-      <Input
-        label="Сумма начисления, сом"
-        type="number" step="0.01" min="0"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        hint="Премия, доплата, разовое начисление"
-        required
-      />
-      <Input label="Дата" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-      <Input label="Комментарий" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Премия за месяц / разовая доплата" />
-      <div className="text-[11px] text-ink-soft">
-        Это ручное начисление в дополнение к автоматическому по ставке.
-        Сразу отобразится в общем остатке к выплате.
       </div>
     </FormSheet>
   );

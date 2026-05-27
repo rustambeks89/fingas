@@ -280,7 +280,7 @@ function TankSheet({ open, tank, organizationId, stationId, fuelTypes, onClose, 
 
   async function remove() {
     if (!isEdit) return;
-    if (!confirm(`Удалить резервуар «${tank.name}»? Метаданные пропадут, данные azs_balance не пострадают.`)) return;
+    if (!confirm(`Удалить резервуар «${tank.name}»? Метаданные пропадут, архивные данные АСУ не пострадают.`)) return;
     setDeleting(true); setErr('');
     try {
       await deleteTank(tank.id);
@@ -344,7 +344,7 @@ function TankSheet({ open, tank, organizationId, stationId, fuelTypes, onClose, 
       <Input
         label="External tank ID (опц.)"
         type="number"
-        placeholder="например, номер резервуара в POS"
+        placeholder="например, номер резервуара в АСУ"
         value={form.external_tank_id}
         onChange={(e) => setForm({ ...form, external_tank_id: e.target.value })}
       />

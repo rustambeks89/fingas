@@ -85,7 +85,7 @@ export default function SystemScreen() {
             <div className="mt-1 text-xl font-bold text-ink">
               {state.selling?.exists && state.balance?.exists && state.profiles?.exists ? 'В норме' : 'Проверка'}
             </div>
-            <div className="mt-0.5 text-xs text-ink-muted">Быстрая диагностика таблиц и подключения Supabase</div>
+            <div className="mt-0.5 text-xs text-ink-muted">Диагностика подключения и синхронизации с базой данных</div>
             <div className="grid grid-cols-3 gap-2 mt-2.5">
               <MetricCard label="Продажи" ok={state.selling?.exists} />
               <MetricCard label="Балансы" ok={state.balance?.exists} />
@@ -102,8 +102,8 @@ export default function SystemScreen() {
             <Server className="w-4 h-4" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-semibold text-ink">Supabase</div>
-            <div className="text-[10px] text-ink-muted truncate">{supabaseUrl || '—'}</div>
+            <div className="text-xs font-semibold text-ink">Служба базы данных</div>
+            <div className="text-[10px] text-ink-muted truncate">{supabaseUrl ? 'Подключено' : '—'}</div>
           </div>
           <Badge tone={supabaseUrl ? 'success' : 'danger'}>
             {supabaseUrl ? 'connected' : 'no env'}
@@ -113,19 +113,19 @@ export default function SystemScreen() {
 
       {/* MYSQL SYNC */}
       <div className="text-[11px] uppercase tracking-wider text-ink-soft mt-4 mb-1.5 px-1">
-        MySQL → Supabase
+        Синхронизация данных АСУ
       </div>
       <Card className="!p-1 rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl">
         <ul className="divide-y divide-line/50">
           <Row
-            label="Продажи (azs_selling)"
-            hint="Продажи из АСУ АЗС"
+            label="Продажи"
+            hint="Синхронизация продаж АСУ"
             data={state.selling}
             loading={state.loading}
           />
           <Row
-            label="Балансы (azs_balance)"
-            hint="Остатки по резервуарам"
+            label="Балансы"
+            hint="Синхронизация балансов АСУ"
             data={state.balance}
             loading={state.loading}
           />
@@ -139,8 +139,8 @@ export default function SystemScreen() {
       <Card className="!p-1 rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl">
         <ul className="divide-y divide-line/50">
           <Row
-            label="Профили (profiles)"
-            hint="Пользователи + роли"
+            label="Профили сотрудников"
+            hint="Служебная база пользователей"
             data={state.profiles}
             loading={state.loading}
           />

@@ -90,7 +90,7 @@ export default function FuelBalancesScreen() {
 
   return (
     <div className="pb-4">
-      <ScreenHeader title="Запасы топлива" subtitle="Источник: azs_balance (read-only)" />
+      <ScreenHeader title="Запасы топлива" subtitle="Источник: АСУ (только чтение)" />
 
       {!loading && rows.length > 0 && (
         <motion.div
@@ -157,7 +157,7 @@ export default function FuelBalancesScreen() {
         <EmptyState
           icon={Droplets}
           title="Нет данных"
-          description="Таблица azs_balance пока не синхронизирована с MySQL."
+          description="Данные резервуаров ещё не синхронизированы с АСУ."
         />
       )}
 

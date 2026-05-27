@@ -36,22 +36,17 @@ export default function AccountSetupScreen() {
             <div className="min-w-0">
               <div className="font-semibold text-ink">
                 {looksLikeMissingTable
-                  ? 'В Supabase нет таблиц Fingas'
+                  ? 'База данных Fingas не инициализирована'
                   : 'Профиль не найден'}
               </div>
               <p className="text-sm text-ink-muted mt-1">
                 {looksLikeMissingTable ? (
                   <>
-                    В подключенном Supabase нет таблицы{' '}
-                    <code className="text-brand-400">public.profiles</code>. Это
-                    значит, миграции Fingas ещё не применены.
+                    База данных Fingas не настроена. Пожалуйста, убедитесь, что все необходимые миграции и конфигурации применены.
                   </>
                 ) : (
                   <>
-                    Ваш auth-аккаунт существует, но строка в{' '}
-                    <code className="text-brand-400">public.profiles</code> не
-                    создана. Пройдите регистрацию или попросите владельца
-                    создать профиль.
+                    Ваш аккаунт существует, но личный профиль сотрудника не найден в системе. Пройдите повторную регистрацию или попросите владельца создать профиль.
                   </>
                 )}
               </p>
