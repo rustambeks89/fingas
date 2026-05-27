@@ -13,6 +13,7 @@ import {
   Users,
   Building2,
   MapPin,
+  Plus,
 } from 'lucide-react';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Card } from '@/components/ui/Card';
@@ -270,46 +271,52 @@ export default function NewChatScreen() {
                   {group.key === 'owner' ? <Building2 className="w-3.5 h-3.5" /> : group.key === 'admin' ? <MapPin className="w-3.5 h-3.5" /> : <Users className="w-3.5 h-3.5" />}
                   {group.title}
                 </div>
-                {group.items.map((e, idx) => {
-                  const matchedStation = stations.find((s) => s.id === e.station_id);
-                  return (
-                    <motion.div
-                      key={e.user_id}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      transition={{ delay: idx * 0.02 }}
-                    >
-                      <Card
-                        hoverable
-                        onClick={() => handleCreateChat(e.user_id)}
-                        className="flex items-center gap-3.5 p-3.5 rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl"
-                      >
-                        {e.avatar_url ? (
-                          <div className="w-10 h-10 rounded-xl overflow-hidden border border-line/50 flex-shrink-0">
-                            <img src={e.avatar_url} alt="" className="w-full h-full object-cover" />
-                          </div>
-                        ) : (
-                          <div className="w-10 h-10 rounded-xl border border-brand-500/20 bg-brand-500/10 text-brand-500 flex items-center justify-center font-bold text-sm flex-shrink-0">
-                            {e.full_name?.charAt(0).toUpperCase() || '?'}
-                          </div>
-                        )}
+                
+                <Card className="!p-0.5 overflow-hidden mb-3">
+                  <ul className="divide-y divide-line/25">
+                    {group.items.map((e, idx) => {
+                      const matchedStation = stations.find((s) => s.id === e.station_id);
+                      return (
+                        <motion.li
+                          key={e.user_id}
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          transition={{ delay: idx * 0.015 }}
+                        >
+                          <button
+                            onClick={() => handleCreateChat(e.user_id)}
+                            className="w-full flex items-center gap-3.5 px-3.5 py-3 hover:bg-bg-elevated/40 active:bg-bg-elevated/60 transition-colors text-left cursor-pointer"
+                          >
+                            {e.avatar_url ? (
+                              <div className="w-10 h-10 rounded-full overflow-hidden border border-line/50 flex-shrink-0">
+                                <img src={e.avatar_url} alt="" className="w-full h-full object-cover" />
+                              </div>
+                            ) : (
+                              <div className="w-10 h-10 rounded-full border border-brand-500/20 bg-brand-500/10 text-brand-500 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                                {e.full_name?.charAt(0).toUpperCase() || '?'}
+                              </div>
+                            )}
 
-                        <div className="flex-1 min-w-0">
-                          <div className="font-bold text-sm text-ink truncate font-display">
-                            {e.full_name ?? e.email}
-                          </div>
-                          <div className="text-[10px] text-ink-soft truncate font-sans tracking-wide mt-0.5">
-                            {ROLE_LABELS[e.role] || e.role}
-                            {matchedStation ? ` · АЗС ${matchedStation.name}` : ''}
-                          </div>
-                        </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-bold text-sm text-ink truncate font-display">
+                                {e.full_name ?? e.email}
+                              </div>
+                              <div className="text-[10px] text-ink-soft truncate font-sans tracking-wide mt-0.5">
+                                {ROLE_LABELS[e.role] || e.role}
+                                {matchedStation ? ` · АЗС ${matchedStation.name}` : ''}
+                              </div>
+                            </div>
 
-                        <MessageCircle className="w-4 h-4 text-brand-400 flex-shrink-0" />
-                      </Card>
-                    </motion.div>
-                  );
-                })}
+                            <div className="w-8 h-8 rounded-full bg-brand-500/10 flex items-center justify-center text-brand-400 shrink-0">
+                              <Plus className="w-4 h-4" />
+                            </div>
+                          </button>
+                        </motion.li>
+                      );
+                    })}
+                  </ul>
+                </Card>
               </div>
             ))}
           </AnimatePresence>

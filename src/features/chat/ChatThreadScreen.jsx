@@ -1,19 +1,21 @@
-// [CREATED BY ANTIGRAVITY CLI - 2026-05-25]
+// [CREATED BY ANTIGRAVITY CLI - 2026-05-27]
 // Project: Fingas
-// Purpose: Premium mobile UI for an active chat thread. Features responsive bubbles, image/file attachments, auto-scroll, and system events.
+// Purpose: Premium WhatsApp-style conversation screen featuring circular headers,
+// tail-shaped message bubbles, real-time single/double status ticks, and a sleek bottom pill input box.
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   Send,
-  Clock,
   Loader2,
   Sparkles,
   Settings,
+  User,
+  Check,
+  CheckCheck,
 } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/status/EmptyState';
 import { useChat } from '@/hooks/useChat';
@@ -36,7 +38,7 @@ export default function ChatThreadScreen() {
 
   const scrollRef = useRef(null);
 
-  // Load thread meta-details (name, type, etc.)
+  // Load thread details (avatar, direct participant, station)
   useEffect(() => {
     if (!threadId) return;
     getThreadById(threadId)
@@ -81,7 +83,7 @@ export default function ChatThreadScreen() {
       .catch(() => setThreadMeta(null));
   }, [threadId, user?.id, stations]);
 
-  // Autoscroll to bottom
+  // Scroll to bottom helper
   const scrollToBottom = () => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -120,11 +122,12 @@ export default function ChatThreadScreen() {
     return groups;
   };
 
-  // Check if message was not read by other participants yet
+  // Check read status for ticks
   const isMessageUnread = (msg) => {
-    if (!threadMeta?.participants) return false;
+    if (!threadMeta?.participants) return true;
     const otherParts = threadMeta.participants.filter((p) => p.user_id !== user?.id);
     if (otherParts.length === 0) return false;
+    // Unread if any other active participant has not read it yet
     return otherParts.some((p) => !p.last_read_at || new Date(p.last_read_at) < new Date(msg.created_at));
   };
 
@@ -134,7 +137,7 @@ export default function ChatThreadScreen() {
     return isMessageUnread(msg);
   };
 
-  // Send Actions
+  // Actions
   async function handleSend(e) {
     if (e) e.preventDefault();
     if (!inputText.trim()) return;
@@ -151,7 +154,7 @@ export default function ChatThreadScreen() {
       }
       scrollToBottom();
     } catch {
-      setInputText(text); // Restore text on fail
+      setInputText(text); // Restore
       setLocalErr(editingMessage ? 'Не удалось изменить сообщение.' : 'Не удалось отправить сообщение.');
     }
   }
@@ -171,84 +174,72 @@ export default function ChatThreadScreen() {
 
   return (
     <div className="fixed inset-0 bg-bg z-40 flex flex-col pt-safe-top pb-safe-bottom">
-      {/* Sticky Thread Header */}
-      <header className="glass-premium border-b border-line/50 px-4 py-3 flex items-center justify-between gap-3 relative z-10 flex-shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      {/* WhatsApp Circular Header */}
+      <header className="glass-premium border-b border-line/40 px-3.5 py-2.5 flex items-center justify-between gap-3 relative z-10 flex-shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           <button
             onClick={() => navigate('/more/chat')}
-            className="w-10 h-10 rounded-2xl border border-line/50 bg-bg-card/40 flex items-center justify-center text-ink-muted hover:text-ink active:scale-95 transition-transform"
+            className="w-9 h-9 rounded-full border border-line/50 bg-bg-card/40 flex items-center justify-center text-ink-muted hover:text-ink active:scale-95 transition-transform"
             aria-label="Назад"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           
           {threadMeta?.avatar ? (
-            <div className="w-10 h-10 rounded-xl overflow-hidden border border-line/40 flex-shrink-0">
+            <div className="w-10 h-10 rounded-full overflow-hidden border border-line/45 flex-shrink-0">
               <img src={threadMeta.avatar} alt="" className="w-full h-full object-cover" />
             </div>
-          ) : null}
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-400 flex items-center justify-center flex-shrink-0 font-bold text-sm">
+              {threadMeta?.title?.charAt(0).toUpperCase() || <User className="w-4 h-4" />}
+            </div>
+          )}
 
           <div className="min-w-0">
             <div className="font-bold text-sm text-ink truncate font-display">
               {threadMeta?.title ?? 'Загрузка...'}
             </div>
-            <div className="text-[10px] text-ink-soft truncate font-sans tracking-wide">
+            <div className="text-[10px] text-ink-soft truncate font-sans font-medium tracking-wide">
               {threadMeta?.subtitle ?? 'соединение...'}
             </div>
           </div>
         </div>
+        
         <button
           onClick={() => navigate(`/more/chat/${threadId}/settings`)}
-          className="w-10 h-10 rounded-2xl border border-line/50 bg-bg-card/40 flex items-center justify-center text-ink-muted hover:text-ink active:scale-95 transition-transform flex-shrink-0"
+          className="w-9 h-9 rounded-full border border-line/50 bg-bg-card/40 flex items-center justify-center text-ink-muted hover:text-ink active:scale-95 transition-transform flex-shrink-0"
           aria-label="Настройки чата"
         >
           <Settings className="w-4.5 h-4.5" />
         </button>
       </header>
 
-      <div className="px-4 pt-3">
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="relative overflow-hidden rounded-[2rem] p-4 border border-brand-500/25 bg-gradient-to-br from-brand-500/16 via-brand-500/5 to-bg-soft"
-        >
-          <div className="absolute -top-10 -right-10 w-32 h-32 rounded-full bg-brand-500/10 blur-3xl" />
-          <div className="relative flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-ink-soft">Диалог</div>
-              <div className="mt-1 text-base font-bold text-ink truncate">{threadMeta?.title ?? 'Загрузка...'}</div>
-              <div className="text-xs text-ink-muted truncate">{threadMeta?.subtitle ?? 'соединение...'}</div>
-            </div>
-            <Badge tone="default">{messages.length}</Badge>
-          </div>
-        </motion.div>
-      </div>
-
-      {/* Messages Scroll Area */}
+      {/* Messages Feed */}
       <main
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scroll-smooth no-scrollbar"
+        className="flex-1 overflow-y-auto px-3.5 py-3 space-y-3.5 scroll-smooth no-scrollbar bg-gradient-to-b from-bg/40 to-bg-soft/20"
       >
         {loadingMessages ? (
-          <div className="flex flex-col items-center justify-center py-10 space-y-2">
+          <div className="flex flex-col items-center justify-center py-12 space-y-2">
             <Loader2 className="w-6 h-6 text-brand-500 animate-spin" />
             <span className="text-xs text-ink-soft">Загрузка переписки...</span>
           </div>
         ) : error ? (
-          <div className="bg-danger/10 border border-danger/30 text-danger rounded-2xl p-4 text-xs text-center">
+          <div className="bg-danger/10 border border-danger/30 text-danger rounded-xl p-4 text-xs text-center">
             {error}
           </div>
         ) : messages.length === 0 ? (
           <EmptyState
             icon={Sparkles}
-            title="Здесь начнется диалог"
-            description="Отправьте первое сообщение, чтобы начать общение с коллегами."
+            title="Начало переписки"
+            description="Отправьте первое сообщение в чат, чтобы начать общение с командой."
           />
         ) : (
           Object.entries(groupMessagesByDate(messages)).map(([dateLabel, groupMsgs]) => (
-            <div key={dateLabel} className="space-y-4">
-              <div className="flex justify-center my-4">
-                <span className="bg-bg-soft/80 border border-line/45 rounded-full px-3.5 py-1 text-[10px] font-bold text-ink-soft uppercase tracking-wider font-sans">
+            <div key={dateLabel} className="space-y-3">
+              {/* Date Group Header */}
+              <div className="flex justify-center my-3 select-none">
+                <span className="bg-bg-elevated/70 border border-line/40 rounded-xl px-3.5 py-0.5 text-[9px] font-black text-ink-soft uppercase tracking-wider">
                   {dateLabel}
                 </span>
               </div>
@@ -259,8 +250,8 @@ export default function ChatThreadScreen() {
 
                 if (isSystem) {
                   return (
-                    <div key={m.id} className="flex justify-center my-2">
-                      <div className="bg-bg-soft/70 border border-line/40 rounded-2xl px-4 py-2 text-center text-xs text-ink-soft max-w-[85%] leading-relaxed flex items-start gap-1.5 font-sans">
+                    <div key={m.id} className="flex justify-center my-2.5">
+                      <div className="bg-bg-soft/70 border border-line/40 rounded-xl px-4 py-1.5 text-center text-xs text-ink-soft max-w-[85%] leading-relaxed flex items-start justify-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-brand-400 mt-0.5 flex-shrink-0" />
                         <span>{m.message}</span>
                       </div>
@@ -268,53 +259,73 @@ export default function ChatThreadScreen() {
                   );
                 }
 
+                const unread = isMessageUnread(m);
                 const editable = canEditOrDelete(m);
 
                 return (
-                  <div key={m.id} className={`flex gap-2.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    {/* Sender Avatar for group chats */}
-                    {!isMe && m.sender?.avatar_url && (
-                      <div className="w-8 h-8 rounded-lg overflow-hidden border border-line/40 flex-shrink-0 self-end mb-1">
-                        <img src={m.sender.avatar_url} alt="" className="w-full h-full object-cover" />
+                  <div key={m.id} className={`flex gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    {/* Circle Avatar for Group Chats */}
+                    {!isMe && (
+                      <div className="w-7 h-7 rounded-full overflow-hidden border border-line/45 flex-shrink-0 self-end mb-0.5">
+                        {m.sender?.avatar_url ? (
+                          <img src={m.sender.avatar_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full bg-brand-500/10 text-brand-400 flex items-center justify-center font-bold text-[10px]">
+                            {m.sender?.full_name?.charAt(0).toUpperCase() || '?'}
+                          </div>
+                        )}
                       </div>
                     )}
 
                     <div className="max-w-[78%] flex flex-col">
-                      {/* Sender Name for group chats */}
+                      {/* Sender Details */}
                       {!isMe && m.sender?.full_name && (
-                        <span className="text-[10px] font-bold text-ink-soft mb-1 pl-1 font-display">
-                          {m.sender.full_name} ({ROLE_LABELS[m.sender.role] || m.sender.role})
+                        <span className="text-[10px] font-black text-ink-soft mb-1 pl-1 truncate">
+                          {m.sender.full_name} · <span className="text-[9px] uppercase tracking-wider">{ROLE_LABELS[m.sender.role] || m.sender.role}</span>
                         </span>
                       )}
 
-                      {/* Message Bubble */}
+                      {/* WhatsApp Tail Bubble */}
                       <div
-                        className={`rounded-[1.5rem] px-4 py-3 text-sm leading-relaxed ${
+                        className={`rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                           isMe
-                            ? 'bg-gradient-to-b from-brand-500 to-brand-600 text-white rounded-br-none shadow-[0_4px_16px_-4px_rgba(34,197,94,0.22)] border border-brand-500/20'
-                            : 'bg-bg-card border border-line/45 text-ink rounded-bl-none shadow-card'
+                            ? 'bg-gradient-to-tr from-brand-600/90 to-brand-500/90 text-white rounded-tr-none shadow-sm border border-brand-400/20'
+                            : 'bg-bg-card border border-line/45 text-ink rounded-tl-none shadow-sm'
                         }`}
                       >
-                        <div className="whitespace-pre-wrap break-words font-sans">{m.message}</div>
+                        <div className="whitespace-pre-wrap break-words font-sans selection:bg-brand-500/35">{m.message}</div>
 
-                        {/* Timestamp inside bubble */}
+                        {/* Status ticks and Time info inside bubble */}
                         <div
-                          className={`text-[9px] font-mono mt-1.5 flex items-center justify-end gap-1 ${
-                            isMe ? 'text-white/60' : 'text-ink-soft'
+                          className={`text-[8.5px] mt-1 flex items-center justify-end gap-1.5 font-sans ${
+                            isMe ? 'text-white/70' : 'text-ink-soft'
                           }`}
                         >
-                          {m.edited && <span className="text-[8px] uppercase tracking-wider opacity-85 mr-1 font-bold">Изменено</span>}
-                          <Clock className="w-2.5 h-2.5" />
-                          {new Date(m.created_at).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                          {m.edited && <span className="text-[7.5px] uppercase tracking-wider font-bold mr-0.5">Изменено</span>}
+                          
+                          <span className="font-mono">
+                            {new Date(m.created_at).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+
+                          {/* WhatsApp Ticks Status */}
+                          {isMe && (
+                            <span className="shrink-0 flex items-center">
+                              {unread ? (
+                                <Check className="w-3.5 h-3.5 text-white/50" />
+                              ) : (
+                                <CheckCheck className="w-3.5 h-3.5 text-blue-300 drop-shadow-glow" />
+                              )}
+                            </span>
+                          )}
                         </div>
                       </div>
 
-                      {/* Inline Actions (Edit/Delete) for sent unread messages */}
+                      {/* Inline Actions */}
                       {editable && (
-                        <div className="flex items-center justify-end gap-3 mt-1.5 px-1.5 text-[10px] font-bold text-brand-500">
+                        <div className="flex items-center justify-end gap-2.5 mt-1 px-1.5 text-[9px] font-black text-brand-500 uppercase tracking-wider">
                           <button
                             type="button"
                             onClick={() => startEditing(m)}
@@ -322,7 +333,7 @@ export default function ChatThreadScreen() {
                           >
                             Изменить
                           </button>
-                          <span className="text-line/60">•</span>
+                          <span className="text-line/40 select-none">•</span>
                           <button
                             type="button"
                             onClick={() => handleDeleteMessage(m.id)}
@@ -341,17 +352,17 @@ export default function ChatThreadScreen() {
         )}
       </main>
 
-      {/* Input controls Panel */}
-      <footer className="glass-premium border-t border-line/50 p-3.5 relative z-10 flex-shrink-0 safe-bottom">
+      {/* WhatsApp Pill Input Footer */}
+      <footer className="glass-premium border-t border-line/45 p-3 relative z-10 flex-shrink-0 safe-bottom">
         {localErr && (
-          <div className="text-[11px] text-danger bg-danger/10 border border-danger/30 rounded-xl px-3 py-1.5 mb-2 text-center font-bold">
+          <div className="text-[10px] text-danger bg-danger/10 border border-danger/30 rounded-xl px-3 py-1.5 mb-2 text-center font-bold uppercase tracking-wider">
             {localErr}
           </div>
         )}
 
-        {/* Editing indicator banner */}
+        {/* Editing indicator */}
         {editingMessage && (
-          <div className="flex items-center justify-between bg-brand-500/10 border-l-2 border-brand-500 px-3.5 py-2 mb-2 rounded-r-xl text-xs">
+          <div className="flex items-center justify-between bg-brand-500/10 border-l-2 border-brand-500 px-3 py-1.5 mb-2 rounded-r-xl text-xs">
             <span className="text-ink-muted truncate">Редактирование: "{editingMessage.message}"</span>
             <button
               type="button"
@@ -359,31 +370,38 @@ export default function ChatThreadScreen() {
                 setEditingMessage(null);
                 setInputText('');
               }}
-              className="text-brand-500 font-bold hover:underline ml-2"
+              className="text-brand-500 font-extrabold hover:underline ml-2"
             >
               Отмена
             </button>
           </div>
         )}
 
-        <form onSubmit={handleSend} className="flex items-center gap-2">
-          {/* Text Input area */}
-          <input
-            type="text"
-            placeholder="Ваше сообщение..."
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            className="flex-1 h-12 px-4 rounded-2xl bg-bg-elevated border border-line/45 text-ink placeholder:text-ink-soft focus:outline-none focus:border-brand-500/50 transition-colors text-sm font-sans"
-          />
+        <form onSubmit={handleSend} className="flex items-center gap-2 max-w-screen-sm mx-auto">
+          {/* Pill Container */}
+          <div className="flex-1 flex items-center bg-bg-elevated border border-line/45 rounded-full h-11 px-4 focus-within:border-brand-500/40 transition-colors shadow-inner">
+            <input
+              type="text"
+              placeholder="Сообщение..."
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              className="flex-1 bg-transparent border-none text-ink placeholder:text-ink-soft focus:outline-none text-sm font-sans h-full min-w-0"
+            />
+          </div>
 
-          {/* Send Button */}
-          <Button
+          {/* Circular Button */}
+          <button
             type="submit"
             disabled={!inputText.trim()}
-            className="w-12 h-12 p-0 rounded-2xl flex items-center justify-center flex-shrink-0"
+            className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
+              inputText.trim()
+                ? 'bg-brand-500 text-white shadow-glow active:scale-90 cursor-pointer'
+                : 'bg-bg-elevated text-ink-soft border border-line/45 cursor-not-allowed'
+            }`}
+            aria-label="Отправить"
           >
-            <Send className="w-4.5 h-4.5" />
-          </Button>
+            <Send className="w-4 h-4" />
+          </button>
         </form>
       </footer>
     </div>

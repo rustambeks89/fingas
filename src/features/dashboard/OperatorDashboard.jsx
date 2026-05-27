@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/hooks/useAuth';
 import { formatMoney, formatDateTime } from '@/lib/formatters';
 import { getCurrentOpenShift } from '@/services/shiftService';
-import DashboardChatCard from './DashboardChatCard';
+
 
 
 export default function OperatorDashboard() {
@@ -120,7 +120,6 @@ export default function OperatorDashboard() {
         </Card>
       </Link>
 
-      <DashboardChatCard />
     </div>
   );
 }

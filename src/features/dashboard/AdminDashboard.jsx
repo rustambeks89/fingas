@@ -25,7 +25,7 @@ import { listFuelSupply, listTankMeasurements } from '@/services/fuelService';
 import { getCurrentOpenShift } from '@/services/shiftService';
 import { supabase } from '@/lib/supabaseClient';
 import { formatLiters, formatMoney, formatRelative } from '@/lib/formatters';
-import DashboardChatCard from './DashboardChatCard';
+
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -198,7 +198,6 @@ export default function AdminDashboard() {
         />
       </div>
 
-      <DashboardChatCard />
 
       {/* Quick Navigation Cards */}
       <div className="grid grid-cols-3 gap-2">

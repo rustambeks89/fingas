@@ -22,7 +22,7 @@ import { listTaxes } from '@/services/taxService';
 import { aggregateForShift } from '@/services/salesService';
 import { useAuth } from '@/hooks/useAuth';
 import { formatMoney } from '@/lib/formatters';
-import DashboardChatCard from './DashboardChatCard';
+
 
 export default function AccountantDashboard() {
   const { user } = useAuth();
@@ -173,7 +173,6 @@ export default function AccountantDashboard() {
         />
       </div>
 
-      <DashboardChatCard />
 
       {/* Action Links */}
       <div className="grid grid-cols-2 gap-2">

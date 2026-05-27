@@ -13,7 +13,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 const TrendChart = lazy(() => import('./TrendChart'));
-const DashboardChatCard = lazy(() => import('./DashboardChatCard'));
+
 import {
   AlertTriangle,
   Building2,
@@ -464,10 +464,7 @@ export default function OwnerDashboard() {
         </div>
       )}
 
-      {/* CHAT WIDGET */}
-      <Suspense fallback={null}>
-        <DashboardChatCard />
-      </Suspense>
+
 
       {/* TANKS RESERVOIRS STATUS PANEL */}
       <Card className="!p-4 shadow-card border border-line/30 bg-bg-card/75 backdrop-blur-2xl">

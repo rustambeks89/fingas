@@ -182,7 +182,14 @@ export function TopBar() {
       <header className="sticky top-0 z-20 border-b border-transparent safe-top bg-bg-card/85 backdrop-blur-xl">
         <div className="max-w-screen-sm mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex-1 min-w-0">
-            <Wordmark />
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="focus:outline-none cursor-pointer transition-transform active:scale-95 flex items-center select-none"
+              aria-label="Перезагрузить"
+            >
+              <Wordmark />
+            </button>
           </div>
           
           <div className="flex-1 flex items-center justify-end gap-3">

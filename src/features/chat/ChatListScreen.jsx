@@ -1,20 +1,22 @@
-// [CREATED BY ANTIGRAVITY CLI - 2026-05-25]
+// [CREATED BY ANTIGRAVITY CLI - 2026-05-27]
 // Project: Fingas
-// Purpose: Premium mobile UI listing all chat threads (direct, station, organization) with unread count overlays and filter controls.
+// Purpose: Premium mobile chat list interface styled exactly like modern WhatsApp
+// with contiguous divided rows, circle avatars, real-time message previews, and precise unread badges.
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  MessageSquare,
   Search,
   Users,
   Building2,
   MapPin,
   ClipboardList,
   Plus,
-  Clock,
   ChevronRight,
+  User,
+  Image as ImageIcon,
+  FileText,
 } from 'lucide-react';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Card } from '@/components/ui/Card';
@@ -39,7 +41,6 @@ export default function ChatListScreen() {
     const isOrg = t.type === 'organization';
 
     if (isDirect) {
-      // Find the other participant
       const otherPart = t.participants?.find((p) => p.user_id !== user?.id);
       const name = otherPart?.user?.full_name ?? otherPart?.user?.email ?? 'Сотрудник';
       const avatar = otherPart?.user?.avatar_url;
@@ -48,8 +49,8 @@ export default function ChatListScreen() {
         title: name,
         subtitle: roleText || 'Личный чат',
         avatar,
-        icon: Users,
-        iconColor: 'text-brand-500 bg-brand-500/10 border-brand-500/20',
+        icon: User,
+        iconColor: 'text-brand-400 bg-brand-500/10 border-brand-500/20',
       };
     }
 
@@ -94,51 +95,81 @@ export default function ChatListScreen() {
     return t.type === filter && matchesSearch;
   });
 
+  const formatMsgTime = (isoString) => {
+    if (!isoString) return '';
+    try {
+      const d = new Date(isoString);
+      const now = new Date();
+      if (d.toDateString() === now.toDateString()) {
+        return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      }
+      const yesterday = new Date();
+      yesterday.setDate(now.getDate() - 1);
+      if (d.toDateString() === yesterday.toDateString()) {
+        return 'Вчера';
+      }
+      return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    } catch {
+      return '';
+    }
+  };
+
+  const renderMessagePreview = (thread) => {
+    const msg = thread.latest_message;
+    if (!msg) return <span className="text-ink-soft italic">Сообщений нет. Нажмите, чтобы начать чат</span>;
+
+    const isMe = msg.sender_id === user?.id;
+    const prefix = isMe ? 'Вы: ' : '';
+    
+    if (msg.message_type === 'image') {
+      return (
+        <span className="flex items-center gap-1 text-brand-400 font-medium">
+          <ImageIcon className="w-3.5 h-3.5" /> {prefix}Фотография
+        </span>
+      );
+    }
+    if (msg.message_type === 'file') {
+      return (
+        <span className="flex items-center gap-1 text-brand-400 font-medium">
+          <FileText className="w-3.5 h-3.5" /> {prefix}Документ / Файл
+        </span>
+      );
+    }
+    if (msg.message_type === 'system') {
+      return <span className="text-ink-soft italic">{msg.message}</span>;
+    }
+    return <span>{prefix}{msg.message}</span>;
+  };
+
   return (
     <div className="pb-8">
-      <div className="flex items-center justify-between">
-        <ScreenHeader title="Чат команды" subtitle="Внутренняя переписка и координация" />
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3.5">
+        <ScreenHeader title="Чаты" subtitle="Команда · координация" />
         <Button
           size="sm"
-          className="h-10 w-10 p-0 rounded-2xl flex items-center justify-center"
+          className="h-9 w-9 p-0 rounded-xl flex items-center justify-center bg-brand-500 text-white shadow-glow"
           onClick={() => navigate('/more/new-chat')}
+          aria-label="Новый чат"
         >
           <Plus className="w-5 h-5" />
         </Button>
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="relative overflow-hidden rounded-2xl p-3.5 mb-3 border border-brand-500/20 bg-bg-card shadow-sm"
-      >
-        <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-brand-500/5 blur-2xl" />
-        <div className="relative">
-          <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft font-bold">Переписка</div>
-          <div className="mt-1 text-xl font-bold text-ink">{filtered.length}</div>
-          <div className="mt-0.5 text-xs text-ink-muted">{threads.length} тредов · {loading ? 'загрузка' : 'готово'}</div>
-          <div className="grid grid-cols-3 gap-2 mt-2.5">
-            <MiniCard label="Личные" value={threads.filter((t) => t.type === 'direct').length} />
-            <MiniCard label="АЗС" value={threads.filter((t) => t.type === 'station').length} />
-            <MiniCard label="Компания" value={threads.filter((t) => t.type === 'organization').length} />
-          </div>
-        </div>
-      </motion.div>
-
       {/* Search Input */}
-      <div className="relative mb-4">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-ink-soft" />
+      <div className="relative mb-3">
+        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-soft" />
         <input
           type="text"
-          placeholder="Поиск диалога или сотрудника..."
+          placeholder="Поиск чата или коллеги..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="block w-full h-13 pl-11 pr-4 rounded-2xl bg-bg-card border border-line/45 text-ink placeholder:text-ink-soft focus:outline-none focus:border-brand-500/50 transition-colors"
+          className="block w-full h-10.5 pl-10 pr-4 rounded-xl bg-bg-card border border-line/40 text-ink text-sm placeholder:text-ink-soft focus:outline-none focus:border-brand-500/50 transition-colors"
         />
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex bg-bg-soft/80 border border-line/35 p-1 rounded-2xl gap-1 mb-4 overflow-x-auto no-scrollbar">
+      <div className="flex bg-bg-elevated/40 border border-line/30 p-0.5 rounded-xl gap-0.5 mb-3 overflow-x-auto no-scrollbar">
         {[
           { id: 'all', label: 'Все' },
           { id: 'direct', label: 'Личные' },
@@ -148,9 +179,9 @@ export default function ChatListScreen() {
           <button
             key={tab.id}
             onClick={() => setFilter(tab.id)}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+            className={`flex-1 py-1.5 px-3 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
               filter === tab.id
-                ? 'text-ink bg-bg-card shadow-card scale-[1.01]'
+                ? 'text-white bg-brand-500 shadow-sm'
                 : 'text-ink-soft hover:text-ink active:scale-95'
             }`}
           >
@@ -160,101 +191,109 @@ export default function ChatListScreen() {
       </div>
 
       {/* Thread list container */}
-      <div className="space-y-2.5">
+      <Card className="!p-0.5 overflow-hidden">
         {loading ? (
-          <div className="space-y-2.5">
+          <div className="divide-y divide-line/20">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 rounded-[2rem] bg-bg-card border border-line/30 animate-pulse" />
+              <div key={i} className="h-16 px-3 flex items-center gap-3 animate-pulse">
+                <div className="w-11 h-11 rounded-full bg-bg-elevated" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3.5 bg-bg-elevated rounded w-1/3" />
+                  <div className="h-3 bg-bg-elevated rounded w-2/3" />
+                </div>
+              </div>
             ))}
           </div>
         ) : error ? (
-          <div className="bg-danger/10 border border-danger/30 text-danger rounded-2xl p-4 text-sm">
+          <div className="bg-danger/10 border border-danger/30 text-danger rounded-xl p-4 text-xs text-center m-2">
             {error}
           </div>
         ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={MessageSquare}
-            title={searchQuery ? 'Диалоги не найдены' : 'Сообщений пока нет'}
-            description={
-              searchQuery
-                ? 'Попробуйте изменить запрос поиска.'
-                : 'Начните личный чат с сотрудником или напишите в общий чат АЗС!'
-            }
-          />
+          <div className="p-4">
+            <EmptyState
+              icon={Users}
+              title={searchQuery ? 'Чаты не найдены' : 'Диалогов пока нет'}
+              description={
+                searchQuery
+                  ? 'Попробуйте изменить поисковый запрос.'
+                  : 'Нажмите кнопку «+» сверху, чтобы открыть диалог с коллегами.'
+              }
+            />
+          </div>
         ) : (
-          <AnimatePresence mode="wait">
-            {filtered.map((t, idx) => {
-              const meta = getThreadMeta(t);
-              const me = t.participants?.find((p) => p.user_id === user?.id);
-              const isUnread =
-                t.last_message_at &&
-                (!me?.last_read_at || new Date(t.last_message_at) > new Date(me.last_read_at));
+          <ul className="divide-y divide-line/25">
+            <AnimatePresence mode="wait">
+              {filtered.map((t, idx) => {
+                const meta = getThreadMeta(t);
+                const me = t.participants?.find((p) => p.user_id === user?.id);
+                const isUnread =
+                  t.last_message_at &&
+                  (!me?.last_read_at || new Date(t.last_message_at) > new Date(me.last_read_at));
 
-              return (
-                <motion.div
-                  key={t.id}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ delay: idx * 0.02 }}
-                >
-                  <Card
-                    hoverable
-                    onClick={() => navigate(`/more/chat/${t.id}`)}
-                    className={`flex items-center gap-3.5 p-4 rounded-[1.4rem] bg-bg-card/75 border-line/70 backdrop-blur-xl ${
-                      isUnread ? 'border border-brand-500/25 bg-brand-500/2' : ''
-                    }`}
+                return (
+                  <motion.li
+                    key={t.id}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ delay: idx * 0.015 }}
                   >
-                    {/* Icon / Avatar Slot */}
-                    <div className="relative flex-shrink-0">
-                      {meta.avatar ? (
-                        <div className="w-12 h-12 rounded-2xl overflow-hidden border border-line/50">
-                          <img src={meta.avatar} alt="" className="w-full h-full object-cover" />
-                        </div>
-                      ) : (
-                        <div className={`w-12 h-12 rounded-2xl border flex items-center justify-center ${meta.iconColor}`}>
-                          <meta.icon className="w-5.5 h-5.5" />
-                        </div>
-                      )}
-                      {isUnread && (
-                        <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-brand-500 border border-bg-card shadow-glow animate-pulse" />
-                      )}
-                    </div>
-
-                    {/* Meta info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="font-bold text-sm text-ink truncate font-display">{meta.title}</div>
-                        {t.last_message_at && (
-                          <div className="text-[10px] text-ink-soft flex items-center gap-0.5 whitespace-nowrap font-mono">
-                            <Clock className="w-3 h-3" />
-                            {new Date(t.last_message_at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                    <button
+                      onClick={() => navigate(`/more/chat/${t.id}`)}
+                      className={`w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-bg-elevated/40 active:bg-bg-elevated/60 transition-colors relative cursor-pointer ${
+                        isUnread ? 'bg-brand-500/[0.015]' : ''
+                      }`}
+                    >
+                      {/* Avatar Slot */}
+                      <div className="relative flex-shrink-0">
+                        {meta.avatar ? (
+                          <div className="w-11 h-11 rounded-full overflow-hidden border border-line/45">
+                            <img src={meta.avatar} alt="" className="w-full h-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className={`w-11 h-11 rounded-full border flex items-center justify-center ${meta.iconColor}`}>
+                            <meta.icon className="w-5 h-5" />
                           </div>
                         )}
+                        {isUnread && (
+                          <span className="absolute top-0 right-0 w-2.5 h-2.5 rounded-full bg-brand-500 border border-bg-card shadow-glow animate-pulse" />
+                        )}
                       </div>
-                      <div className="text-xs text-ink-soft truncate font-sans mt-0.5">{meta.subtitle}</div>
-                    </div>
 
-                    <ChevronRight className="w-4 h-4 text-ink-soft flex-shrink-0" />
-                  </Card>
-                </motion.div>
-              );
-            })}
-          </AnimatePresence>
+                      {/* Meta & Last Message Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className={`text-sm font-bold truncate font-display ${isUnread ? 'text-ink' : 'text-ink'}`}>
+                            {meta.title}
+                          </div>
+                          {t.last_message_at && (
+                            <div className={`text-[10px] whitespace-nowrap font-sans ${isUnread ? 'text-brand-400 font-bold' : 'text-ink-soft'}`}>
+                              {formatMsgTime(t.last_message_at)}
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="flex items-center justify-between gap-2 mt-0.5">
+                          <div className={`text-xs truncate flex-1 leading-normal ${isUnread ? 'text-ink font-semibold' : 'text-ink-soft'}`}>
+                            {renderMessagePreview(t)}
+                          </div>
+                          {isUnread && t.unread_count > 0 && (
+                            <span className="bg-brand-500 text-white font-mono text-[9px] font-black h-4.5 min-w-4.5 px-1 rounded-full flex items-center justify-center shadow-glow shrink-0">
+                              {t.unread_count}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <ChevronRight className="w-3.5 h-3.5 text-ink-soft flex-shrink-0" />
+                    </button>
+                  </motion.li>
+                );
+              })}
+            </AnimatePresence>
+          </ul>
         )}
-      </div>
-    </div>
-  );
-}
-
-function MiniCard({ label, value }) {
-  return (
-    <div className="rounded-xl bg-bg-card/75 border border-white/5 p-2.5 backdrop-blur-xl">
-      <div className="text-[9px] uppercase tracking-[0.18em] text-ink-soft font-bold">{label}</div>
-      <div className="mt-0.5 text-xs font-bold text-ink truncate">{value}</div>
+      </Card>
     </div>
   );
 }

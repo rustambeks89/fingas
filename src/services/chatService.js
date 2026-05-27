@@ -42,7 +42,34 @@ async function enrichThreads(threads) {
     }
   }
   const profiles = await fetchProfilesByUserIds(userIds);
-  return attachProfilesToThreads(threads, profiles);
+  const enriched = attachProfilesToThreads(threads, profiles);
+
+  // Fetch the latest message for each thread to display WhatsApp-style previews
+  await Promise.all(
+    enriched.map(async (t) => {
+      if (!t.last_message_at) {
+        t.latest_message = null;
+        return;
+      }
+      try {
+        const { data: messages } = await supabase
+          .from('chat_messages')
+          .select(`
+            *,
+            sender:profiles ( id, full_name, avatar_url, role )
+          `)
+          .eq('thread_id', t.id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        t.latest_message = messages?.[0] ?? null;
+      } catch (e) {
+        console.warn('[Fingas enrichThreads] error fetching latest message:', e);
+        t.latest_message = null;
+      }
+    })
+  );
+
+  return enriched;
 }
 
 // 1. Fetch all threads for current user
