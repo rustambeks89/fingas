@@ -21,7 +21,7 @@ export async function listLatestBalances({ stationId } = {}) {
   const shopKey = await resolveShopKey(stationId);
   let q = supabase
     .from('azs_balance')
-    .select('*')
+    .select('id, ShiftKey, ShopKey, FuelName, fuel_name, liters, tank_id, measured_at, synced_at, level_cm')
     .order('synced_at', { ascending: false })
     .limit(200);
   if (shopKey != null) q = q.eq('ShopKey', shopKey);

@@ -183,9 +183,11 @@ export async function computeFifoCost({ stationId, from, to }) {
   return result;
 }
 
-// Group revenue + liters by fuel type for a period.
 export async function aggregateByFuel({ stationId, from, to } = {}) {
-  const rows = await listSales({ stationId, from, to, limit: 50000 });
+  const rows = await listSales({
+    stationId, from, to, limit: 50000,
+    columns: 'FuelName, ShopCost, Volume',
+  });
   const map = new Map();
   for (const r of rows) {
     const fuel = r.FuelName ?? r.fuel_name ?? '—';
@@ -205,7 +207,10 @@ const PAYMENT_LABELS = {
 };
 
 export async function aggregateByPaymentType({ stationId, from, to } = {}) {
-  const rows = await listSales({ stationId, from, to, limit: 5000 });
+  const rows = await listSales({
+    stationId, from, to, limit: 5000,
+    columns: 'BasePaymentTypeKey, ShopCost',
+  });
   const map = new Map();
   for (const r of rows) {
     const k = String(r.BasePaymentTypeKey ?? '—');
@@ -220,7 +225,10 @@ export async function aggregateByPaymentType({ stationId, from, to } = {}) {
 // Aggregate by shift (ShiftKey). Each shift = one row with operator name,
 // time range, revenue, liters, #transactions, fuel mix.
 export async function aggregateByShift({ stationId, from, to, limit = 20 } = {}) {
-  const rows = await listSales({ stationId, from, to, limit: 10000 });
+  const rows = await listSales({
+    stationId, from, to, limit: 10000,
+    columns: 'ShiftKey, OperatorName, ShopCost, Volume, TransactionDatetime, FuelName',
+  });
   const map = new Map();
   for (const r of rows) {
     const key = r.ShiftKey ?? '—';
@@ -348,7 +356,10 @@ export async function aggregateHourHeatmap({ stationId, from, to } = {}) {
 
 // Top operators by revenue.
 export async function aggregateByOperator({ stationId, from, to, limit = 10 } = {}) {
-  const rows = await listSales({ stationId, from, to, limit: 50000 });
+  const rows = await listSales({
+    stationId, from, to, limit: 50000,
+    columns: 'OperatorName, ShopCost, Volume, ShiftKey',
+  });
   const map = new Map();
   for (const r of rows) {
     const op = r.OperatorName ?? '—';
@@ -367,7 +378,10 @@ export async function aggregateByOperator({ stationId, from, to, limit = 10 } = 
 
 // Revenue per hour-of-day, summed across all selected days.
 export async function aggregateByHour({ stationId, from, to } = {}) {
-  const rows = await listSales({ stationId, from, to, limit: 50000 });
+  const rows = await listSales({
+    stationId, from, to, limit: 50000,
+    columns: 'TransactionDatetime, ShopCost',
+  });
   const bins = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: `${h}:00`, revenue: 0, count: 0 }));
   for (const r of rows) {
     const d = r.TransactionDatetime ? new Date(r.TransactionDatetime) : null;

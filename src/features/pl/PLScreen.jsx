@@ -20,6 +20,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabaseClient';
 import { aggregateForShift, computeFifoCost } from '@/services/salesService';
+import { aggregateBalanceByMonth } from '@/services/shiftService';
 import { listFuelSupply } from '@/services/fuelService';
 import { listTaxes } from '@/services/taxService';
 import { useAuth } from '@/hooks/useAuth';
@@ -120,11 +121,11 @@ export default function PLScreen() {
 
       const now = new Date();
       const fromY = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-      const series12Sales = await aggregateForShift({
+      const monthlyAgg = await aggregateBalanceByMonth({
         stationId,
         from: fromY.toISOString(),
         to: now.toISOString(),
-      }).catch(() => ({ rows: [] }));
+      }).catch(() => []);
       const monthsMap = {};
       for (let i = 0; i < 12; i++) {
         const d = new Date(fromY.getFullYear(), fromY.getMonth() + i, 1);
@@ -134,11 +135,9 @@ export default function PLScreen() {
           revenue: 0, cost: 0, expenses: 0,
         };
       }
-      for (const r of series12Sales.rows ?? []) {
-        const dt = r.TransactionDatetime ?? r.transaction_datetime;
-        if (!dt) continue;
-        const k = String(dt).slice(0, 7);
-        if (monthsMap[k]) monthsMap[k].revenue += Number(r.ShopCost ?? r.shop_cost ?? 0);
+      for (const m of monthlyAgg) {
+        const k = m.day.slice(0, 7);
+        if (monthsMap[k]) monthsMap[k].revenue = Number(m.revenue ?? 0);
       }
       for (const s of supplies) {
         const k = String(s.date).slice(0, 7);

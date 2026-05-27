@@ -146,7 +146,7 @@ async function loadAzsShiftMetaByShiftKeys({ shopKey, shiftKeys }) {
     const chunk = keys.slice(i, i + SHIFT_KEY_CHUNK);
     let q = supabase
       .from('azs_shift')
-      .select('*')
+      .select('ShiftKey, ShopKey, DatetimeShiftBegin, DatetimeShiftEnd, OperatorName')
       .in('ShiftKey', chunk)
       .limit(SHIFT_KEY_CHUNK * 4);
     if (shopKey != null) q = q.eq('ShopKey', shopKey);
@@ -245,6 +245,16 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50 } 
     .order('synced_at', { ascending: false })
     .limit(5000);
   if (shopKey != null) balQ = balQ.eq('ShopKey', shopKey);
+  if (from) {
+    const fromDate = new Date(from);
+    fromDate.setDate(fromDate.getDate() - 2); // 2 days buffer before
+    balQ = balQ.gte('synced_at', fromDate.toISOString());
+  }
+  if (to) {
+    const toDate = new Date(to);
+    toDate.setDate(toDate.getDate() + 3); // 3 days buffer after
+    balQ = balQ.lte('synced_at', toDate.toISOString());
+  }
 
   const { data: balanceRows, error: balErr } = await balQ;
   if (balErr) throw balErr;
