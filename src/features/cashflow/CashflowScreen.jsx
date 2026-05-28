@@ -40,6 +40,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { deleteCashflowWithSync, listCashflow, listWallets, updateCashflow } from '@/services/cashflowService';
+import { PullToRefresh } from '@/components/ui/PullToRefresh';
 import { Input, Select } from '@/components/ui/Input';
 import { listCounterparties } from '@/services/counterpartyService';
 import { useAuth } from '@/hooks/useAuth';
@@ -84,6 +85,13 @@ const PERIODS = [
   { id: '30d', label: '30 дней', days: 30 },
   { id: 'mtd', label: 'Месяц'           },
 ];
+
+// Fetch only last 90 days to avoid loading thousands of rows
+function fetchFrom() {
+  const d = new Date();
+  d.setDate(d.getDate() - 90);
+  return d.toISOString().slice(0, 10);
+}
 
 const FILTERS = [
   { id: 'all',              label: 'Все операции' },
@@ -142,7 +150,7 @@ export default function CashflowScreen() {
     setErr('');
     try {
       const [cashflow, w, s] = await Promise.all([
-        listCashflow({ limit: 500 }).catch(() => []),
+        listCashflow({ limit: 200, fromDate: fetchFrom() }).catch(() => []),
         orgId ? listWallets({ organizationId: orgId, active: true }).catch(() => []) : [],
         orgId ? listCounterparties({ organizationId: orgId, type: 'supplier', active: true }).catch(() => []) : [],
       ]);
@@ -330,6 +338,7 @@ export default function CashflowScreen() {
   }
 
   return (
+    <PullToRefresh onRefresh={load}>
     <div className="space-y-4 pb-4">
       <ScreenHeader
         title="Кэшфлоу"
@@ -651,8 +660,10 @@ export default function CashflowScreen() {
         <Input label="Комментарий" value={editForm.note} onChange={(e) => setEditForm((c) => ({ ...c, note: e.target.value }))} />
       </FormSheet>
     </div>
+    </PullToRefresh>
   );
 }
+
 
 function OpRow({ row, index, canEdit, canDelete, onEdit, onDelete }) {
   const meta = OP_META[row.operation_type] ?? { label: row.operation_type, icon: Repeat, tone: 'default' };

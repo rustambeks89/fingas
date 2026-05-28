@@ -54,6 +54,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
 import { formatDateTime, formatLiters, formatMoney } from '@/lib/formatters';
+import { PullToRefresh } from '@/components/ui/PullToRefresh';
 
 
 export default function ShiftsScreen() {
@@ -245,6 +246,7 @@ export default function ShiftsScreen() {
   }, [filteredShifts]);
 
   return (
+    <PullToRefresh onRefresh={reload}>
     <div className="space-y-3 pb-2">
       <ScreenHeader
         title="Смены"
@@ -451,8 +453,10 @@ export default function ShiftsScreen() {
         onDone={async () => { setEditingOperator(null); await reload(); }}
       />
     </div>
+    </PullToRefresh>
   );
 }
+
 
 function reportForShift(reportByKey, shift) {
   if (!shift) return null;

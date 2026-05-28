@@ -25,6 +25,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
 import { formatDateTime, formatLiters, formatMoney, formatTime, parsePosDate } from '@/lib/formatters';
 import { downloadCSV, todayStamp } from '@/lib/exporters';
+import { PullToRefresh } from '@/components/ui/PullToRefresh';
 
 const PERIODS = [
   { id: 'week', label: '7 дней' },
@@ -203,6 +204,7 @@ export default function SalesScreen() {
   const leaders = useMemo(() => buildLeaders(allRows), [allRows]);
 
   return (
+    <PullToRefresh onRefresh={load}>
     <div className="space-y-4 pb-4">
       <ScreenHeader
         title="Продажи"
@@ -350,6 +352,7 @@ export default function SalesScreen() {
         </>
       )}
     </div>
+    </PullToRefresh>
   );
 }
 

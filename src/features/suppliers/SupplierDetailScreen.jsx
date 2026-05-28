@@ -28,6 +28,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
 import { formatDate, formatMoney, formatPhone } from '@/lib/formatters';
 import { downloadCSV, todayStamp } from '@/lib/exporters';
+import { PullToRefresh } from '@/components/ui/PullToRefresh';
 
 export default function SupplierDetailScreen() {
   const { user } = useAuth();
@@ -66,15 +67,16 @@ export default function SupplierDetailScreen() {
   useEffect(() => { reload(); }, [reload, location.key]);
 
   useEffect(() => {
+    // Reload when user returns to the tab (not on every focus/blur)
+    let wasHidden = false;
     function onVisible() {
-      if (document.visibilityState === 'visible') reload();
+      if (document.visibilityState === 'hidden') { wasHidden = true; return; }
+      if (wasHidden && document.visibilityState === 'visible') { wasHidden = false; reload(); }
     }
     const handleUpdate = () => reload();
-    window.addEventListener('focus', reload);
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('fingas-data-changed', handleUpdate);
     return () => {
-      window.removeEventListener('focus', reload);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('fingas-data-changed', handleUpdate);
     };
@@ -101,6 +103,7 @@ export default function SupplierDetailScreen() {
   const balance = Number(supplier.balance ?? 0);
 
   return (
+    <PullToRefresh onRefresh={reload}>
     <div>
       <button
         onClick={() => navigate(-1)}
@@ -312,6 +315,7 @@ export default function SupplierDetailScreen() {
         onSaved={async () => { setBankSheet(null); await reload(); }}
       />
     </div>
+    </PullToRefresh>
   );
 }
 

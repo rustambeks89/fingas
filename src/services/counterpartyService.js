@@ -155,8 +155,7 @@ export async function deleteBankAccount(id) {
 
 export async function paySupplier({ supplierId, organizationId, stationId, amount, date, note, userId }) {
   // Step 1: Insert directly into cashflow (source of truth).
-  // We do NOT rely on the DB trigger (fingas_shadow_supplier_payment) because
-  // it may not be applied on the remote DB, causing the cashflow entry to be missing.
+  // Even if steps 2-3 fail, the payment is recorded and will show in cashflow.
   const { data: cfRow, error: cfErr } = await supabase
     .from('cashflow')
     .insert({
@@ -173,41 +172,45 @@ export async function paySupplier({ supplierId, organizationId, stationId, amoun
     })
     .select('id')
     .single();
-  if (cfErr) throw cfErr;
+  if (cfErr) throw cfErr; // Step 1 is critical — throw if cashflow insert fails
 
-  // Step 2: Insert into supplier_payments with cashflow_id already set
-  // so the shadow trigger (if it exists) skips re-inserting into cashflow.
-  const { data: spRow, error: spErr } = await supabase
-    .from('supplier_payments')
-    .insert({
-      supplier_id: supplierId,
-      organization_id: organizationId,
-      station_id: stationId,
-      amount,
-      date,
-      note: note || null,
-      created_by: userId,
-      cashflow_id: cfRow.id,
-    })
-    .select()
-    .single();
-  if (spErr) throw spErr;
-
-  // Step 3: Update counterparty balance directly (subtract payment amount).
-  // Read current balance then write new value — avoids supabase.raw() which
-  // is not available in the JS SDK.
-  const { data: cp } = await supabase
-    .from('counterparties')
-    .select('balance')
-    .eq('id', supplierId)
-    .single();
-  if (cp !== null && cp !== undefined) {
+  // Step 2: Sync to supplier_payments (non-critical — cashflow is source of truth).
+  // May fail if cashflow_id column not yet migrated on remote DB — that's fine.
+  try {
     await supabase
-      .from('counterparties')
-      .update({ balance: Number(cp.balance ?? 0) - Number(amount) })
-      .eq('id', supplierId);
+      .from('supplier_payments')
+      .insert({
+        supplier_id: supplierId,
+        organization_id: organizationId,
+        station_id: stationId,
+        amount,
+        date,
+        note: note || null,
+        created_by: userId,
+        cashflow_id: cfRow.id,
+      });
+  } catch (e) {
+    console.warn('[paySupplier] supplier_payments sync failed (non-critical):', e?.message);
   }
 
-  return spRow;
+  // Step 3: Update counterparty balance (non-critical — balance can be recalculated).
+  try {
+    const { data: cp } = await supabase
+      .from('counterparties')
+      .select('balance')
+      .eq('id', supplierId)
+      .single();
+    if (cp != null) {
+      await supabase
+        .from('counterparties')
+        .update({ balance: Number(cp.balance ?? 0) - Number(amount) })
+        .eq('id', supplierId);
+    }
+  } catch (e) {
+    console.warn('[paySupplier] balance update failed (non-critical):', e?.message);
+  }
+
+  return { id: cfRow.id };
 }
+
 

@@ -8,11 +8,12 @@ import { motion } from 'framer-motion';
 import {
   Home,
   Menu,
-  Plus,
   TrendingUp,
   Wallet,
 } from 'lucide-react';
+
 import { cn } from '@/lib/cn';
+
 import { QuickAddSheet } from '@/components/bottom-sheets/QuickAddSheet';
 
 export function BottomNav() {
@@ -60,29 +61,15 @@ export function BottomNav() {
                     {/* Radial sheen highlight */}
                     <span className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 ease-out" />
                     
-                    {/* Custom Premium Glowing SVG Plus Sign */}
+                    {/* Plus icon — static SVG, no re-animation each render */}
                     <svg
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
-                      className="w-5 h-5 relative z-10 text-white drop-shadow-[0_2px_8px_rgba(255,255,255,0.65)] transition-transform duration-500 group-hover:rotate-180"
+                      className="w-5 h-5 relative z-10 text-white drop-shadow-[0_2px_8px_rgba(255,255,255,0.65)] transition-transform duration-500 group-hover:rotate-45"
                     >
-                      <motion.path
-                        d="M12 5V19"
-                        strokeWidth={3}
-                        strokeLinecap="round"
-                        initial={{ pathLength: 0 }}
-                        animate={{ pathLength: 1 }}
-                        transition={{ duration: 0.45, ease: 'easeOut' }}
-                      />
-                      <motion.path
-                        d="M5 12H19"
-                        strokeWidth={3}
-                        strokeLinecap="round"
-                        initial={{ pathLength: 0 }}
-                        animate={{ pathLength: 1 }}
-                        transition={{ duration: 0.45, ease: 'easeOut', delay: 0.12 }}
-                      />
+                      <path d="M12 5V19" strokeWidth={3} strokeLinecap="round" />
+                      <path d="M5 12H19" strokeWidth={3} strokeLinecap="round" />
                     </svg>
                   </motion.button>
                 </div>

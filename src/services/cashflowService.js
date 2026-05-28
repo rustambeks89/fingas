@@ -4,7 +4,7 @@
 
 import { supabase } from '@/lib/supabaseClient';
 
-export async function listCashflow({ stationId, operationType, status, limit = 100 } = {}) {
+export async function listCashflow({ stationId, operationType, status, limit = 100, fromDate } = {}) {
   let q = supabase
     .from('cashflow')
     .select(`
@@ -18,10 +18,12 @@ export async function listCashflow({ stationId, operationType, status, limit = 1
   if (stationId) q = q.eq('station_id', stationId);
   if (operationType) q = q.eq('operation_type', operationType);
   if (status) q = q.eq('status', status);
+  if (fromDate) q = q.gte('date', fromDate);
   const { data, error } = await q;
   if (error) throw error;
   return data ?? [];
 }
+
 
 export async function createCashflow(row) {
   const { data, error } = await supabase

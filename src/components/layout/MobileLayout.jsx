@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
 import { BottomNav } from '@/components/navigation/BottomNav';
 import { TopBar } from './TopBar';
+
 const DashboardChatCard = lazy(() => import('@/features/dashboard/DashboardChatCard'));
 
 export function MobileLayout() {

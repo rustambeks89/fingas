@@ -17,6 +17,8 @@ import { createFuelSupply, deleteFuelSupply, listFuelSupply, updateFuelSupply } 
 import { listCounterparties } from '@/services/counterpartyService';
 import { listStations } from '@/services/stationService';
 import { useAuth } from '@/hooks/useAuth';
+import { useOrgContext } from '@/hooks/useOrgContext';
+import { PullToRefresh } from '@/components/ui/PullToRefresh';
 import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
 import { formatDate, formatLiters, formatMoney } from '@/lib/formatters';
@@ -77,8 +79,15 @@ export default function FuelSupplyScreen() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const organizationId = user?.profile?.organization_id;
-  const stationId = user?.profile?.station_id;
+  const { organizationId, stationId: profileStationId, stations: orgStations } = useOrgContext();
+  const [pickedStationId, setPickedStationId] = useState(profileStationId ?? '');
+  useEffect(() => {
+    if (!pickedStationId && orgStations.length > 0) {
+      setPickedStationId(profileStationId ?? orgStations[0].id);
+    }
+  }, [profileStationId, orgStations, pickedStationId]);
+  const stationId = pickedStationId || profileStationId;
+  const showStationPicker = orgStations.length > 1 || (!profileStationId && orgStations.length > 0);
 
   const loadData = useCallback(async () => {
     if (!organizationId) {
@@ -87,24 +96,27 @@ export default function FuelSupplyScreen() {
       setLoading(false);
       return;
     }
+    if (!stationId) {
+      setLoading(false);
+      return;
+    }
 
     setErr('');
     setLoading(true);
     try {
-      const [fuelSupplyRows, supplierRows, stationRows] = await Promise.all([
+      const [fuelSupplyRows, supplierRows] = await Promise.all([
         listFuelSupply({ stationId }),
         listCounterparties({ organizationId, type: 'supplier', active: true }),
-        listStations(organizationId).catch(() => []),
       ]);
       setRows(fuelSupplyRows);
       setSuppliers(supplierRows);
-      setStations(stationRows);
+      setStations(orgStations);
     } catch (e) {
       setErr(e?.message ?? 'Не удалось загрузить поступления топлива.');
     } finally {
       setLoading(false);
     }
-  }, [organizationId, stationId]);
+  }, [organizationId, stationId, orgStations]);
 
   useEffect(() => {
     loadData();
@@ -256,19 +268,34 @@ export default function FuelSupplyScreen() {
   }
 
   return (
-    <div>
-      <ScreenHeader
-        title="Поступления топлива"
-        subtitle="Плотность, объем, документ и приемка"
-        right={canCreate(MODULES.FUEL_SUPPLY) ? (
-          <Button size="sm" onClick={openCreateSheet}>
-            <Plus className="w-4 h-4" />
-            Добавить
-          </Button>
-        ) : null}
-      />
+    <PullToRefresh onRefresh={loadData}>
+      <div>
+        <ScreenHeader
+          title="Поступления топлива"
+          subtitle="Плотность, объем, документ и приемка"
+          right={canCreate(MODULES.FUEL_SUPPLY) ? (
+            <Button size="sm" onClick={openCreateSheet}>
+              <Plus className="w-4 h-4" />
+              Добавить
+            </Button>
+          ) : null}
+        />
 
-      {err && <Card className="text-sm text-danger mb-3">{err}</Card>}
+        {showStationPicker && (
+          <div className="mb-3">
+            <Select
+              label="АЗС"
+              value={pickedStationId}
+              onChange={(e) => setPickedStationId(e.target.value)}
+            >
+              {orgStations.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </Select>
+          </div>
+        )}
+
+        {err && <Card className="text-sm text-danger mb-3">{err}</Card>}
       {!loading && rows.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
@@ -448,6 +475,7 @@ export default function FuelSupplyScreen() {
         />
       </FormSheet>
     </div>
+    </PullToRefresh>
   );
 }
 
