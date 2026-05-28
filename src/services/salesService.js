@@ -13,6 +13,24 @@
 
 import { supabase } from '@/lib/supabaseClient';
 
+export function safeParseDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  let str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const parts = str.split('-');
+    return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  }
+  if (str.includes('-') && str.includes(' ')) {
+    str = str.replace(' ', 'T');
+  }
+  const d = new Date(str);
+  if (!Number.isNaN(d.getTime())) return d;
+  const d2 = new Date(str.replace(/-/g, '/'));
+  if (!Number.isNaN(d2.getTime())) return d2;
+  return null;
+}
+
 // Internal: resolve station UUID → external ShopKey integer.
 async function resolveShopKey(stationId) {
   if (!stationId) return null;
@@ -60,7 +78,7 @@ export async function aggregateForShift({ stationId, from, to } = {}) {
     const vol  = Number(r.Volume   ?? 0);
     revenue += cost;
     liters  += vol;
-    const fuel = r.FuelName ?? '';
+    const fuel = normalizeFuel(r.FuelName);
     if (fuel) {
       const g = perFuel.get(fuel) ?? { liters: 0, revenue: 0 };
       g.liters  += vol;
@@ -82,19 +100,22 @@ export async function aggregateForShift({ stationId, from, to } = {}) {
         .gte('date', fromDate)
         .lte('date', toDate);
       for (const c of calRows ?? []) {
-        const fuel = c.fuel ?? '';
+        const fuel = normalizeFuel(c.fuel);
         const v    = Number(c.volume ?? 0);
         if (!fuel || !(v > 0)) continue;
         const g = perFuel.get(fuel);
         if (!g || !(g.liters > 0)) continue;
         const deduct = Math.min(g.liters, v);
         const price  = g.revenue / g.liters;
-        calibrationLiters  += deduct;
-        calibrationRevenue += deduct * price;
-        // Уменьшаем «оставшийся» бюджет в perFuel чтобы повторные строки
-        // не списывали один и тот же объём дважды.
-        g.liters  -= deduct;
-        g.revenue -= deduct * price;
+        
+        const originalLiters = g.liters;
+        const originalRevenue = g.revenue;
+        
+        g.liters = Math.max(0, originalLiters - deduct);
+        g.revenue = g.liters * price;
+        
+        calibrationLiters  += (originalLiters - g.liters);
+        calibrationRevenue += (originalRevenue - g.revenue);
       }
     } catch (e) {
       console.warn('[salesService] aggregateForShift calibration deduction failed:', e?.message ?? e);
@@ -137,9 +158,27 @@ export async function computeFifoCost({ stationId, from, to }) {
     .limit(50000);
   if (shopKey != null) salesQ = salesQ.eq('ShopKey', shopKey);
 
-  const [suppliesQ, salesR] = await Promise.all([supplyQ, salesQ]);
+  let calQ = supabase
+    .from('calibrations')
+    .select('date, fuel, volume')
+    .gte('date', fromHist.slice(0, 10))
+    .lte('date', to.slice(0, 10));
+  if (stationId) calQ = calQ.eq('station_id', stationId);
+
+  const [suppliesQ, salesR, calR] = await Promise.all([supplyQ, salesQ, calQ]);
   const supplies = suppliesQ.data ?? [];
   const sales = salesR.data ?? [];
+  const calRows = calR.data ?? [];
+
+  const calMap = new Map();
+  for (const c of calRows) {
+    const day = String(c.date ?? '').slice(0, 10);
+    const fuel = normalizeFuel(c.fuel);
+    const v = Number(c.volume ?? 0);
+    if (!day || !fuel || !(v > 0)) continue;
+    const key = `${day}:${fuel}`;
+    calMap.set(key, (calMap.get(key) ?? 0) + v);
+  }
 
   const layers = new Map();
   let si = 0;
@@ -160,8 +199,20 @@ export async function computeFifoCost({ stationId, from, to }) {
       si++;
     }
 
-    const fuel = (sale.FuelName ?? '').trim();
-    let need = Number(sale.Volume ?? 0);
+    const fuel = normalizeFuel(sale.FuelName);
+    const key = `${saleDate}:${fuel}`;
+    let saleVol = Number(sale.Volume ?? 0);
+    if (calMap.has(key)) {
+      const debt = calMap.get(key);
+      if (debt > 0 && saleVol > 0) {
+        const deduct = Math.min(saleVol, debt);
+        saleVol -= deduct;
+        calMap.set(key, debt - deduct);
+      }
+    }
+    if (saleVol <= 0.0001) continue;
+
+    let need = saleVol;
     const queue = layers.get(fuel) ?? [];
     let cost = 0;
     while (need > 0.0001 && queue.length > 0) {
@@ -176,7 +227,7 @@ export async function computeFifoCost({ stationId, from, to }) {
     if (saleDate >= fromDate && saleDate <= toDate) {
       result.total += cost;
       if (!result.byFuel[fuel]) result.byFuel[fuel] = { sold_liters: 0, cost: 0 };
-      result.byFuel[fuel].sold_liters += Number(sale.Volume ?? 0);
+      result.byFuel[fuel].sold_liters += saleVol;
       result.byFuel[fuel].cost += cost;
     }
   }
@@ -186,15 +237,56 @@ export async function computeFifoCost({ stationId, from, to }) {
 export async function aggregateByFuel({ stationId, from, to } = {}) {
   const rows = await listSales({
     stationId, from, to, limit: 50000,
-    columns: 'FuelName, ShopCost, Volume',
+    columns: 'FuelName, ShopCost, Volume, TransactionDatetime',
   });
+
+  const calMap = new Map();
+  if (stationId && from && to) {
+    try {
+      const fromDate = String(from).slice(0, 10);
+      const toDate = String(to).slice(0, 10);
+      const { data: calRows } = await supabase
+        .from('calibrations')
+        .select('date, fuel, volume')
+        .eq('station_id', stationId)
+        .gte('date', fromDate)
+        .lte('date', toDate);
+      for (const c of calRows ?? []) {
+        const day = String(c.date ?? '').slice(0, 10);
+        const fuel = normalizeFuel(c.fuel);
+        const v = Number(c.volume ?? 0);
+        if (!day || !fuel || !(v > 0)) continue;
+        const key = `${day}:${fuel}`;
+        calMap.set(key, (calMap.get(key) ?? 0) + v);
+      }
+    } catch (e) {
+      console.warn('[salesService] aggregateByFuel calibrations load failed:', e?.message ?? e);
+    }
+  }
+
   const map = new Map();
   for (const r of rows) {
-    const fuel = r.FuelName ?? r.fuel_name ?? '—';
+    const fuel = normalizeFuel(r.FuelName ?? r.fuel_name ?? '—');
+    const day = String(r.TransactionDatetime ?? r.transaction_datetime ?? '').slice(0, 10);
+    const key = `${day}:${fuel}`;
+    let vol = Number(r.Volume ?? 0);
+    let cost = Number(r.ShopCost ?? 0);
+
+    if (calMap.has(key)) {
+      const debt = calMap.get(key);
+      if (debt > 0 && vol > 0) {
+        const deduct = Math.min(vol, debt);
+        const price = cost / vol;
+        vol = Math.max(0, vol - deduct);
+        cost = vol * price;
+        calMap.set(key, debt - deduct);
+      }
+    }
+
     if (!map.has(fuel)) map.set(fuel, { fuel, revenue: 0, liters: 0, count: 0 });
     const g = map.get(fuel);
-    g.revenue += Number(r.ShopCost ?? 0);
-    g.liters += Number(r.Volume ?? 0);
+    g.revenue += cost;
+    g.liters += vol;
     g.count += 1;
   }
   return [...map.values()].sort((a, b) => b.revenue - a.revenue);
@@ -264,9 +356,8 @@ export async function aggregateByShift({ stationId, from, to, limit = 20 } = {})
 // берём local-год/месяц/число — иначе ночные транзакции (UTC < 06:00 для
 // UTC+6) попадают в предыдущий день.
 function localYMD(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
+  const d = safeParseDate(value);
+  if (!d) return null;
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -407,4 +498,13 @@ export async function compareWindows({ stationId, currentFrom, currentTo, priorF
     litersDelta: cur.liters - prev.liters,
     litersDeltaPct: prev.liters > 0 ? ((cur.liters - prev.liters) / prev.liters) * 100 : null,
   };
+}
+
+export function normalizeFuel(name) {
+  const n = String(name ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  if (['92Е5', '92E5', 'АИ95', 'АИ-95'].includes(n)) return 'АИ-95';
+  if (['АИ92', 'АИ-92'].includes(n)) return 'АИ-92';
+  if (['ДТ', 'DIESEL', 'ДИЗЕЛЬ', 'ДТ ЛЕТО', 'ДТ ЗИМА'].includes(n)) return 'ДТ';
+  if (['СУГ', 'ГАЗ', 'LPG'].includes(n)) return 'СУГ';
+  return n;
 }

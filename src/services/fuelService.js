@@ -65,13 +65,11 @@ export async function listTankMeasurements({ stationId, limit = 100 } = {}) {
 }
 
 export async function createTankMeasurement(row) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('tank_measurements')
-    .insert(row)
-    .select()
-    .single();
+    .insert(row);
   if (error) throw error;
-  return data;
+  return row;
 }
 
 export async function updateTankMeasurement(id, patch) {

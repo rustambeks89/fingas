@@ -43,6 +43,24 @@ const COUNTER_FLOOR = 1_000_000;
 const SHIFT_HISTORY_FLOOR = 631;
 const SHIFT_KEY_CHUNK = 200;
 
+export function safeParseDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  let str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const parts = str.split('-');
+    return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  }
+  if (str.includes('-') && str.includes(' ')) {
+    str = str.replace(' ', 'T');
+  }
+  const d = new Date(str);
+  if (!Number.isNaN(d.getTime())) return d;
+  const d2 = new Date(str.replace(/-/g, '/'));
+  if (!Number.isNaN(d2.getTime())) return d2;
+  return null;
+}
+
 async function resolveShopKey(stationId) {
   if (!stationId) return null;
   const { data } = await supabase
@@ -292,7 +310,7 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50, l
     const g = shifts.get(key);
     g.liters  += liters;
     g.revenue += revenue;
-    const fuel = r.FuelName ?? '—';
+    const fuel = normalizeFuel(r.FuelName ?? '—');
     if (!g.fuels[fuel]) g.fuels[fuel] = { liters: 0, revenue: 0 };
     g.fuels[fuel].liters  += liters;
     g.fuels[fuel].revenue += revenue;
@@ -396,54 +414,76 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50, l
       const dateBounds = combined.reduce((acc, s) => {
         const a = s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt;
         if (!a) return acc;
-        const d = new Date(a);
-        if (Number.isNaN(d.getTime())) return acc;
+        const d = safeParseDate(a);
+        if (!d) return acc;
         if (!acc.min || d < acc.min) acc.min = d;
         if (!acc.max || d > acc.max) acc.max = d;
         return acc;
       }, { min: null, max: null });
       if (dateBounds.min && dateBounds.max) {
-        const calFrom = new Date(dateBounds.min); calFrom.setHours(0, 0, 0, 0);
-        const calTo   = new Date(dateBounds.max); calTo.setHours(23, 59, 59, 999);
+        const calFromDate = localYMD(new Date(dateBounds.min.getTime() - 86400000));
+        const calToDate   = localYMD(new Date(dateBounds.max.getTime() + 86400000));
         const { data: calRows } = await supabase
           .from('calibrations')
-          .select('date, fuel, volume')
+          .select('date, time, fuel, volume')
           .eq('station_id', stationId)
-          .gte('date', calFrom.toISOString().slice(0, 10))
-          .lte('date', calTo.toISOString().slice(0, 10));
+          .gte('date', calFromDate)
+          .lte('date', calToDate);
         if (calRows && calRows.length > 0) {
-          // Карта: 'YYYY-MM-DD' -> { fuel -> totalLiters }
-          const byDayFuel = new Map();
           for (const c of calRows) {
-            const day = String(c.date ?? '').slice(0, 10);
-            const fuel = c.fuel ?? '';
-            const v = Number(c.volume ?? 0);
-            if (!day || !fuel || !(v > 0)) continue;
-            if (!byDayFuel.has(day)) byDayFuel.set(day, new Map());
-            const m = byDayFuel.get(day);
-            m.set(fuel, (m.get(fuel) ?? 0) + v);
-          }
-          for (const s of combined) {
-            const a = s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt;
-            if (!a) continue;
-            const day = (new Date(a)).toISOString().slice(0, 10);
-            const m = byDayFuel.get(day);
-            if (!m) continue;
-            for (const [fuel, calLitersTotal] of m.entries()) {
-              const fuelGroup = s.fuels?.[fuel];
-              if (!fuelGroup || !(fuelGroup.liters > 0) || !(calLitersTotal > 0)) continue;
-              const deduct = Math.min(fuelGroup.liters, calLitersTotal);
-              const priceForFuel = fuelGroup.liters > 0 ? fuelGroup.revenue / fuelGroup.liters : 0;
-              const deductRevenue = deduct * priceForFuel;
-              fuelGroup.liters  -= deduct;
-              fuelGroup.revenue -= deductRevenue;
-              s.liters  -= deduct;
-              s.revenue -= deductRevenue;
-              // Остаток поверочного объёма на день — раздаётся между сменами одного дня
-              m.set(fuel, calLitersTotal - deduct);
-              // Помечаем сколько вычли — пригодится UI чтобы показать «- поверка X л»
-              s.calibrationDeducted = (s.calibrationDeducted ?? 0) + deduct;
-              s.calibrationDeductedRevenue = (s.calibrationDeductedRevenue ?? 0) + deductRevenue;
+            const calTimeStr = c.time || '00:00:00';
+            const calDateTime = safeParseDate(`${c.date}T${calTimeStr}`);
+            if (!calDateTime) continue;
+            const fuel = normalizeFuel(c.fuel);
+            const volume = Number(c.volume ?? 0);
+            if (!(volume > 0)) continue;
+
+            let matchedShift = null;
+
+            // 1. Match by shift duration time interval
+            for (const s of combined) {
+              if (s.firstAt && s.lastAt) {
+                const start = safeParseDate(s.firstAt);
+                const end = safeParseDate(s.lastAt);
+                if (start && end && calDateTime >= start && calDateTime <= end) {
+                  matchedShift = s;
+                  break;
+                }
+              }
+            }
+
+            // 2. Fallback to day matching
+            if (!matchedShift) {
+              const calDay = localYMD(calDateTime);
+              for (const s of combined) {
+                const sDay = localYMD(s.firstAt ?? s.lastAt ?? s.balanceAt ?? s.syncedAt);
+                if (sDay === calDay) {
+                  matchedShift = s;
+                  break;
+                }
+              }
+            }
+
+            if (matchedShift) {
+              const fuelGroup = matchedShift.fuels?.[fuel];
+              if (fuelGroup && fuelGroup.liters > 0) {
+                const priceForFuel = fuelGroup.liters > 0 ? fuelGroup.revenue / fuelGroup.liters : 0;
+                const originalLiters = fuelGroup.liters;
+                const originalRevenue = fuelGroup.revenue;
+
+                const deduct = Math.min(originalLiters, volume);
+                fuelGroup.liters = Math.max(0, originalLiters - deduct);
+                fuelGroup.revenue = fuelGroup.liters * priceForFuel;
+
+                const deductedLiters = originalLiters - fuelGroup.liters;
+                const deductedRevenue = originalRevenue - fuelGroup.revenue;
+
+                matchedShift.liters -= deductedLiters;
+                matchedShift.revenue -= deductedRevenue;
+
+                matchedShift.calibrationDeducted = (matchedShift.calibrationDeducted ?? 0) + deductedLiters;
+                matchedShift.calibrationDeductedRevenue = (matchedShift.calibrationDeductedRevenue ?? 0) + deductedRevenue;
+              }
             }
           }
         }
@@ -479,9 +519,8 @@ export async function getCurrentShiftFromBalance({ stationId } = {}) {
 // =============================================================================
 
 function localYMD(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
+  const d = safeParseDate(value);
+  if (!d) return null;
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -985,4 +1024,13 @@ export async function updateShiftReport(reportId, patch) {
   });
   if (error) throw error;
   return data;
+}
+
+export function normalizeFuel(name) {
+  const n = String(name ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  if (['92Е5', '92E5', 'АИ95', 'АИ-95'].includes(n)) return 'АИ-95';
+  if (['АИ92', 'АИ-92'].includes(n)) return 'АИ-92';
+  if (['ДТ', 'DIESEL', 'ДИЗЕЛЬ', 'ДТ ЛЕТО', 'ДТ ЗИМА'].includes(n)) return 'ДТ';
+  if (['СУГ', 'ГАЗ', 'LPG'].includes(n)) return 'СУГ';
+  return n;
 }

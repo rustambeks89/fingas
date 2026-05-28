@@ -63,6 +63,7 @@ export function CashflowQuickForm({ mode = 'expense', onDone, onCancel }) {
     e?.preventDefault?.();
     setErr('');
     const amt = Number(form.amount);
+    if (!orgId) { setErr('Не выбрана организация'); return; }
     if (!amt || amt <= 0) { setErr('Сумма должна быть > 0'); return; }
     if (isTransfer && (!form.wallet_from || !form.wallet_to)) {
       setErr('Выберите оба кошелька'); return;

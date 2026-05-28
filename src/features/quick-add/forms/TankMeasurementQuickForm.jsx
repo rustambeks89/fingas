@@ -82,6 +82,7 @@ export function TankMeasurementQuickForm({ onDone, onCancel, defaultTankId = nul
     e?.preventDefault?.();
     setErr('');
     const value = Number(form.value);
+    if (!orgId) { setErr('Не выбрана организация'); return; }
     if (!value || value <= 0) { setErr('Введите значение замера'); return; }
     const chosenStationId = stationId || profileStationId;
     if (!chosenStationId) { setErr('Выберите АЗС'); return; }

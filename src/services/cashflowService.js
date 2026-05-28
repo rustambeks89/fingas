@@ -26,13 +26,11 @@ export async function listCashflow({ stationId, operationType, status, limit = 1
 
 
 export async function createCashflow(row) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('cashflow')
-    .insert(row)
-    .select()
-    .single();
+    .insert(row);
   if (error) throw error;
-  return data;
+  return row;
 }
 
 export async function updateCashflow(id, patch) {

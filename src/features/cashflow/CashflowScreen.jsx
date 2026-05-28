@@ -12,7 +12,7 @@
 // Все расчеты, вызовы Supabase, RLS, удаление с синхронизацией и фильтрации сохранены на 100% в исходном виде.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -81,16 +81,23 @@ const PAYMENT_TYPE_LABEL = {
 };
 
 const PERIODS = [
-  { id: '7d',  label: '7 дней',  days: 7  },
-  { id: '30d', label: '30 дней', days: 30 },
-  { id: 'mtd', label: 'Месяц'           },
+  { id: 'day',   label: 'День'   },
+  { id: 'week',  label: 'Неделя' },
+  { id: 'month', label: 'Месяц'  },
+  { id: 'year',  label: 'Год'    },
 ];
 
-// Fetch only last 90 days to avoid loading thousands of rows
+function localDateString(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Fetch all records since Jan 1st of the current year (timezone-safe)
 function fetchFrom() {
-  const d = new Date();
-  d.setDate(d.getDate() - 90);
-  return d.toISOString().slice(0, 10);
+  const currentYear = new Date().getFullYear();
+  return `${currentYear}-01-01`;
 }
 
 const FILTERS = [
@@ -107,12 +114,24 @@ const FILTERS = [
 function rangeFor(id) {
   const now = new Date();
   const to = new Date(now);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+
   let from;
-  if (id === '7d')  from = new Date(now.getTime() - 6 * 86400000);
-  else if (id === '30d') from = new Date(now.getTime() - 29 * 86400000);
-  else from = new Date(now.getFullYear(), now.getMonth(), 1);
+  if (id === 'day') {
+    from = today;
+  } else if (id === 'week') {
+    const offsetToMonday = (today.getDay() + 6) % 7;
+    from = new Date(today.getTime() - offsetToMonday * 86400000);
+  } else if (id === 'month') {
+    from = new Date(today.getFullYear(), today.getMonth(), 1);
+  } else if (id === 'year') {
+    from = new Date(today.getFullYear(), 0, 1);
+  } else {
+    from = new Date(today.getTime() - 29 * 86400000);
+  }
   from.setHours(0, 0, 0, 0);
-  return { from, to, fromDate: from.toISOString().slice(0, 10), toDate: to.toISOString().slice(0, 10) };
+  return { from, to, fromDate: localDateString(from), toDate: localDateString(to) };
 }
 
 export default function CashflowScreen() {
@@ -120,7 +139,7 @@ export default function CashflowScreen() {
   const { canExport, canEdit, canDelete } = usePermissions();
   const orgId = user?.profile?.organization_id;
 
-  const [period, setPeriod] = useState('30d');
+  const [period, setPeriod] = useState('month');
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -145,12 +164,12 @@ export default function CashflowScreen() {
     status: 'confirmed',
   });
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setErr('');
     try {
       const [cashflow, w, s] = await Promise.all([
-        listCashflow({ limit: 200, fromDate: fetchFrom() }).catch(() => []),
+        listCashflow({ limit: 5000, fromDate: fetchFrom() }).catch(() => []),
         orgId ? listWallets({ organizationId: orgId, active: true }).catch(() => []) : [],
         orgId ? listCounterparties({ organizationId: orgId, type: 'supplier', active: true }).catch(() => []) : [],
       ]);
@@ -165,6 +184,12 @@ export default function CashflowScreen() {
   }, [orgId]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const handleUpdate = () => load({ silent: true });
+    window.addEventListener('fingas-data-changed', handleUpdate);
+    return () => window.removeEventListener('fingas-data-changed', handleUpdate);
+  }, [load]);
 
   const { from, to, fromDate, toDate } = rangeFor(period);
 
@@ -362,7 +387,7 @@ export default function CashflowScreen() {
       )}
 
       {/* Switcher control with sliding Framer Motion pill */}
-      <div className="relative grid grid-cols-3 p-1 rounded-2xl bg-bg-card/75 backdrop-blur-xl border border-line/30 shadow-inner gap-1">
+      <div className="relative grid grid-cols-4 p-1 rounded-2xl bg-bg-card/75 backdrop-blur-xl border border-line/30 shadow-inner gap-1">
         {PERIODS.map((p) => {
           const active = period === p.id;
           return (

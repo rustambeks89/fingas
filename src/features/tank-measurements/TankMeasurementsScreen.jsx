@@ -12,11 +12,9 @@ import {
   Thermometer,
   Droplet,
   CheckCircle2,
-  AlertTriangle,
   FileText,
   Calendar,
   Clock,
-  Sparkles,
 } from 'lucide-react';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Card } from '@/components/ui/Card';
@@ -27,15 +25,8 @@ import { EmptyState } from '@/components/status/EmptyState';
 import { PullToRefresh } from '@/components/ui/PullToRefresh';
 import { useOrgContext } from '@/hooks/useOrgContext';
 import { listTankMeasurements, createTankMeasurement } from '@/services/fuelService';
-import { listLatestBalances } from '@/services/balanceService';
+import { listTanks } from '@/services/tankService';
 import { formatMoney } from '@/lib/formatters';
-
-const TANK_OPTIONS = [
-  { id: '1', name: 'Резервуар №1 (АИ-92)' },
-  { id: '2', name: 'Резервуар №2 (АИ-95)' },
-  { id: '3', name: 'Резервуар №3 (ДТ)' },
-  { id: '4', name: 'Резервуар №4 (СУГ)' },
-];
 
 const FUEL_TYPES = [
   { value: 'АИ-92', label: 'АИ-92 (Бензин)' },
@@ -44,12 +35,19 @@ const FUEL_TYPES = [
   { value: 'СУГ', label: 'СУГ (Газ)' },
 ];
 
+function localDateString(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export default function TankMeasurementsScreen() {
   const { organizationId, stationId: profileStationId, stations } = useOrgContext();
   const [activeTab, setActiveTab] = useState('history'); // history | new
 
   const [measurements, setMeasurements] = useState([]);
-  const [systemBalances, setSystemBalances] = useState([]);
+  const [tanks, setTanks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
@@ -63,32 +61,36 @@ export default function TankMeasurementsScreen() {
   const showStationPicker = stations.length > 1 || (!profileStationId && stations.length > 0);
 
   // Form State
-  const [selectedTank, setSelectedTank] = useState('1');
+  const [selectedTank, setSelectedTank] = useState('');
   const [fuelType, setFuelType] = useState('АИ-92');
   const [inputMode, setInputMode] = useState('level'); // level | volume
   const [levelCm, setLevelCm] = useState('');
   const [liters, setLiters] = useState('');
-  const [temp, setTemp] = useState('15');
-  const [waterLevel, setWaterLevel] = useState('0');
+  const [temp] = useState('15');
+  const [waterLevel] = useState('0');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Sync / Load
-  async function loadData() {
-    if (!stationId) {
+  async function loadData({ silent = false } = {}) {
+    if (!organizationId || !stationId) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setErr('');
     try {
-      const [history, balances] = await Promise.all([
+      const [history, tankRows] = await Promise.all([
         listTankMeasurements({ stationId, limit: 50 }),
-        listLatestBalances({ stationId }).catch(() => []),
+        listTanks({ organizationId, stationId, active: true }).catch(() => []),
       ]);
       setMeasurements(history);
-      setSystemBalances(balances);
+      setTanks(tankRows);
+      setSelectedTank((current) => {
+        if (current && tankRows.some((t) => t.id === current)) return current;
+        return tankRows[0]?.id ?? '';
+      });
     } catch (e) {
       setErr(e?.message ?? 'Не удалось загрузить данные замеров.');
     } finally {
@@ -99,21 +101,21 @@ export default function TankMeasurementsScreen() {
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stationId]);
+  }, [organizationId, stationId]);
 
-  // Compute matched system balance
-  const matchedSystem = systemBalances.find(
-    (b) =>
-      b.fuel_name?.toLowerCase().includes(fuelType.toLowerCase()) ||
-      (fuelType === 'ДТ' && b.fuel_name?.toLowerCase().includes('диз'))
-  );
+  useEffect(() => {
+    const handleUpdate = () => loadData({ silent: true });
+    window.addEventListener('fingas-data-changed', handleUpdate);
+    return () => window.removeEventListener('fingas-data-changed', handleUpdate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organizationId, stationId]);
 
-  const systemLiters = matchedSystem ? Number(matchedSystem.liters || 0) : null;
-  const userLiters = inputMode === 'volume' ? Number(liters || 0) : Number(levelCm || 0) * 15; // Simple cm -> liters mock factor for UX feedback
-
-  const variance = systemLiters ? userLiters - systemLiters : 0;
-  const variancePct = systemLiters ? (variance / systemLiters) * 100 : 0;
-  const hasDiscrepancy = Math.abs(variancePct) > 1.5;
+  useEffect(() => {
+    const tank = tanks.find((t) => t.id === selectedTank);
+    if (!tank?.fuel_code) return;
+    const match = FUEL_TYPES.find((f) => f.value === tank.fuel_code || f.label.includes(tank.fuel_code));
+    setFuelType(match?.value ?? tank.fuel_code);
+  }, [selectedTank, tanks]);
 
   async function handleSubmit(e) {
     if (e) e.preventDefault();
@@ -132,8 +134,8 @@ export default function TankMeasurementsScreen() {
       const row = {
         organization_id: organizationId,
         station_id: stationId,
-        tank_id: selectedTank,
-        date: new Date().toISOString().split('T')[0],
+        tank_id: selectedTank || null,
+        date: localDateString(),
         time: new Date().toTimeString().split(' ')[0],
         fuel_type: fuelType,
         level_cm: inputMode === 'level' && levelCm ? Number(levelCm) : null,
@@ -144,12 +146,14 @@ export default function TankMeasurementsScreen() {
       };
 
       await createTankMeasurement(row);
+      setMeasurements((current) => [{ ...row, id: `pending-${Date.now()}` }, ...current]);
       setSaveSuccess(true);
+      setActiveTab('history');
+      window.dispatchEvent(new Event('fingas-data-changed'));
+      loadData({ silent: true });
       setTimeout(() => {
         setSaveSuccess(false);
-        setActiveTab('history');
-        loadData();
-      }, 1500);
+      }, 1200);
 
       // Reset form
       setLevelCm('');
@@ -340,9 +344,12 @@ export default function TankMeasurementsScreen() {
                     value={selectedTank}
                     onChange={(e) => setSelectedTank(e.target.value)}
                   >
-                    {TANK_OPTIONS.map((t) => (
+                    <option value="">
+                      {tanks.length === 0 ? '— Резервуары не настроены —' : '— Без привязки к резервуару —'}
+                    </option>
+                    {tanks.map((t) => (
                       <option key={t.id} value={t.id}>
-                        {t.name}
+                        {t.number ? `№${t.number} · ` : ''}{t.name}{t.fuel_code ? ` (${t.fuel_code})` : ''}
                       </option>
                     ))}
                   </Select>
@@ -350,12 +357,7 @@ export default function TankMeasurementsScreen() {
                   <Select
                     label="Вид топлива"
                     value={fuelType}
-                    onChange={(e) => {
-                      setFuelType(e.target.value);
-                      // Match default tank option
-                      const matchedIdx = FUEL_TYPES.findIndex((f) => f.value === e.target.value);
-                      if (matchedIdx !== -1) setSelectedTank(String(matchedIdx + 1));
-                    }}
+                    onChange={(e) => setFuelType(e.target.value)}
                   >
                     {FUEL_TYPES.map((f) => (
                       <option key={f.value} value={f.value}>
