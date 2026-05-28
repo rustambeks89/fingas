@@ -189,6 +189,12 @@ export default function SalesScreen() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    const handleUpdate = () => load();
+    window.addEventListener('fingas-data-changed', handleUpdate);
+    return () => window.removeEventListener('fingas-data-changed', handleUpdate);
+  }, [load]);
+
   const allRows = useMemo(
     () => (currentShift ? [currentShift, ...history] : history),
     [currentShift, history],

@@ -69,11 +69,14 @@ export default function SupplierDetailScreen() {
     function onVisible() {
       if (document.visibilityState === 'visible') reload();
     }
+    const handleUpdate = () => reload();
     window.addEventListener('focus', reload);
     document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('fingas-data-changed', handleUpdate);
     return () => {
       window.removeEventListener('focus', reload);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('fingas-data-changed', handleUpdate);
     };
   }, [reload]);
 

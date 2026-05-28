@@ -116,16 +116,18 @@ export default function OwnerDashboard() {
   const [selectedTank, setSelectedTank] = useState(null);
   const [activeFormType, setActiveFormType] = useState(null);
   const [currentShift, setCurrentShift] = useState(null);
-  const [currentShiftLoading, setCurrentShiftLoading] = useState(false);
+  const [currentShiftLoading, setCurrentShiftLoading] = useState(false);  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = () => setRefreshKey((k) => k + 1);
+    window.addEventListener('fingas-data-changed', handleUpdate);
+    return () => window.removeEventListener('fingas-data-changed', handleUpdate);
+  }, []);
 
   function handleFormDone() {
+    window.dispatchEvent(new Event('fingas-data-changed'));
     setActiveFormType(null);
     setSelectedTank(null);
-    setTanksLoading(true);
-    getTankStatusesWithBalance({ organizationId: orgId, stationId })
-      .then((rows) => setTanks(rows))
-      .catch(() => setTanks([]))
-      .finally(() => setTanksLoading(false));
   }
 
   // Каждый блок грузится независимо. Ничего не ждёт «всех» —
@@ -218,7 +220,7 @@ export default function OwnerDashboard() {
         .finally(() => { if (!cancelled) setTrendLoading(false); });
     }
     return () => { cancelled = true; };
-  }, [period, stationId]);
+  }, [period, stationId, refreshKey]);
 
   // 2. Tanks — отдельный лёгкий запрос.
   useEffect(() => {
@@ -229,7 +231,7 @@ export default function OwnerDashboard() {
       .catch(() => { if (!cancelled) setTanks([]); })
       .finally(() => { if (!cancelled) setTanksLoading(false); });
     return () => { cancelled = true; };
-  }, [orgId, stationId]);
+  }, [orgId, stationId, refreshKey]);
 
   // 3. Название станции — один маленький запрос, не блокирует ничего.
   useEffect(() => {
@@ -263,7 +265,7 @@ export default function OwnerDashboard() {
         if (!cancelled) setCurrentShiftLoading(false);
       });
     return () => { cancelled = true; };
-  }, [stationId]);
+  }, [stationId, refreshKey]);
 
   // 4. Алерты — три параллельных независимых запроса. Каждый шлёт свой
   //    апдейт в общий список, а не ждёт остальных.
@@ -313,7 +315,7 @@ export default function OwnerDashboard() {
       });
 
     return () => { cancelled = true; };
-  }, [orgId]);
+  }, [orgId, refreshKey]);
 
   // Add tank-derived alerts
   const allAlerts = useMemo(() => {

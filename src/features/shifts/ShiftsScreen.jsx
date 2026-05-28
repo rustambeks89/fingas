@@ -143,6 +143,12 @@ export default function ShiftsScreen() {
 
   useEffect(() => { reload(); }, [reload]);
 
+  useEffect(() => {
+    const handleUpdate = () => reload();
+    window.addEventListener('fingas-data-changed', handleUpdate);
+    return () => window.removeEventListener('fingas-data-changed', handleUpdate);
+  }, [reload]);
+
   // Attach reconcile report (shift_reports rows) to balance-shifts by ShiftKey.
   // Declared early so filteredShifts can read it without TDZ issues.
   const [reportByKey, setReportByKey] = useState(new Map());

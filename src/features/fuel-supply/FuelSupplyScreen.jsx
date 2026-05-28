@@ -110,6 +110,12 @@ export default function FuelSupplyScreen() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    const handleUpdate = () => loadData();
+    window.addEventListener('fingas-data-changed', handleUpdate);
+    return () => window.removeEventListener('fingas-data-changed', handleUpdate);
+  }, [loadData]);
+
   const totals = useMemo(() => {
     return rows.reduce(
       (acc, row) => {
@@ -203,6 +209,7 @@ export default function FuelSupplyScreen() {
       } else {
         await createFuelSupply(payload);
       }
+      window.dispatchEvent(new Event('fingas-data-changed'));
       setSheetOpen(false);
       setForm(makeEmptyForm());
       setEditingRow(null);
@@ -221,6 +228,7 @@ export default function FuelSupplyScreen() {
     setFormError('');
     try {
       await deleteFuelSupply(editingRow.id);
+      window.dispatchEvent(new Event('fingas-data-changed'));
       setSheetOpen(false);
       setEditingRow(null);
       setForm(makeEmptyForm());
@@ -238,6 +246,7 @@ export default function FuelSupplyScreen() {
     setFormError('');
     try {
       await deleteFuelSupply(row.id);
+      window.dispatchEvent(new Event('fingas-data-changed'));
       await loadData();
     } catch (e) {
       setFormError(e?.message ?? 'Не удалось удалить поступление.');

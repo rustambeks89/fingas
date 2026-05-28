@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { createFuelSupply } from '@/services/fuelService';
 import { listCounterparties } from '@/services/counterpartyService';
 import { listStations } from '@/services/stationService';
-import { tankLitersAtCm, listTankCalibrationGrid } from '@/services/tankService';
+import { tankLitersAtCm, listTankCalibrationGrid, listTanks } from '@/services/tankService';
 import { useAuth } from '@/hooks/useAuth';
 import { useFormPersistence } from '@/hooks/useFormPersistence';
 
@@ -24,6 +24,8 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
 
   const [suppliers, setSuppliers] = useState([]);
   const [stations, setStations] = useState([]);
+  const [tanks, setTanks] = useState([]);
+  const [selectedTankId, setSelectedTankId] = useState(defaultTankId || '');
   const [gridSize, setGridSize] = useState(0); // points count in tank's grid
   const [litersBefore, setLitersBefore] = useState(null);
   const [litersAfter, setLitersAfter] = useState(null);
@@ -60,36 +62,75 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
       .catch(() => setStations([]));
   }, [orgId]);
 
+  // Load tanks matching selected station and fuel_type.
+  useEffect(() => {
+    if (!orgId) return;
+    const chosenStationId = form.station_id || stationId;
+    listTanks({ organizationId: orgId, stationId: chosenStationId, active: true })
+      .then((rows) => {
+        const filtered = rows.filter((t) => {
+          const code = (t.fuel_code || t.fuel_type?.code || '').trim();
+          return code === form.fuel_type.trim();
+        });
+        setTanks(filtered);
+      })
+      .catch(() => setTanks([]));
+  }, [orgId, form.station_id, stationId, form.fuel_type]);
+
+  // Keep selectedTankId in sync with defaultTankId and auto-select if single tank exists
+  useEffect(() => {
+    if (defaultTankId) {
+      setSelectedTankId(defaultTankId);
+    } else {
+      setSelectedTankId('');
+    }
+  }, [defaultTankId]);
+
+  useEffect(() => {
+    if (!defaultTankId && tanks.length > 0) {
+      const exists = tanks.some((t) => t.id === selectedTankId);
+      if (!exists) {
+        if (tanks.length === 1) {
+          setSelectedTankId(tanks[0].id);
+        } else {
+          setSelectedTankId('');
+        }
+      }
+    } else if (!defaultTankId && tanks.length === 0) {
+      setSelectedTankId('');
+    }
+  }, [tanks, defaultTankId, selectedTankId]);
+
   // Load grid size for the selected tank to know if conversion is available.
   useEffect(() => {
-    if (!defaultTankId) { setGridSize(0); return; }
+    if (!selectedTankId) { setGridSize(0); return; }
     let cancelled = false;
-    listTankCalibrationGrid({ tankId: defaultTankId })
+    listTankCalibrationGrid({ tankId: selectedTankId })
       .then((rows) => { if (!cancelled) setGridSize(rows.length); })
       .catch(() => { if (!cancelled) setGridSize(0); });
     return () => { cancelled = true; };
-  }, [defaultTankId]);
+  }, [selectedTankId]);
 
   // Recompute liters-before whenever level_before_cm changes.
   useEffect(() => {
     let cancelled = false;
     const cm = Number(form.level_before_cm);
-    if (!defaultTankId || form.level_before_cm === '' || !Number.isFinite(cm)) {
+    if (!selectedTankId || form.level_before_cm === '' || !Number.isFinite(cm)) {
       setLitersBefore(null); return;
     }
-    tankLitersAtCm({ tankId: defaultTankId, heightCm: cm })
+    tankLitersAtCm({ tankId: selectedTankId, heightCm: cm })
       .then((l) => { if (!cancelled) setLitersBefore(l); })
       .catch(() => { if (!cancelled) setLitersBefore(null); });
     return () => { cancelled = true; };
-  }, [defaultTankId, form.level_before_cm]);
+  }, [selectedTankId, form.level_before_cm]);
 
   useEffect(() => {
     let cancelled = false;
     const cm = Number(form.level_after_cm);
-    if (!defaultTankId || form.level_after_cm === '' || !Number.isFinite(cm)) {
+    if (!selectedTankId || form.level_after_cm === '' || !Number.isFinite(cm)) {
       setLitersAfter(null); return;
     }
-    tankLitersAtCm({ tankId: defaultTankId, heightCm: cm })
+    tankLitersAtCm({ tankId: selectedTankId, heightCm: cm })
       .then((l) => { if (!cancelled) setLitersAfter(l); })
       .catch(() => { if (!cancelled) setLitersAfter(null); });
     return () => { cancelled = true; };
@@ -113,7 +154,7 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
         supplier_id: form.supplier_id || null,
         date: form.date,
         fuel_type: form.fuel_type,
-        tank_id: defaultTankId || null,
+        tank_id: selectedTankId || null,
         doc_number: form.doc_number || null,
         liters_doc,
         liters_actual,
@@ -155,7 +196,8 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
   const measureVsDoc = (measuredDelta != null && litersDoc > 0) ? measuredDelta - litersDoc : null;
 
   const lockFuel = !!defaultFuelType;
-  const gridReady = !!defaultTankId && gridSize >= 2;
+  const lockTank = !!defaultTankId;
+  const gridReady = !!selectedTankId && gridSize >= 2;
 
   return (
     <form onSubmit={submit} className="space-y-4">
@@ -172,6 +214,21 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
           </Select>
         )}
       </div>
+
+      {!lockTank && (
+        <Select
+          label="Резервуар"
+          value={selectedTankId}
+          onChange={(e) => setSelectedTankId(e.target.value)}
+        >
+          <option value="">— Выберите резервуар (необязательно) —</option>
+          {tanks.map((t) => (
+            <option key={t.id} value={t.id}>
+              Резервуар №{t.number} ({t.name})
+            </option>
+          ))}
+        </Select>
+      )}
 
       <Select label="Поставщик" value={form.supplier_id} onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}>
         <option value="">— Не выбран —</option>
@@ -199,7 +256,7 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
       <div className="rounded-2xl border border-line/50 bg-bg-elevated/60 p-3 space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-[11px] uppercase tracking-[0.18em] text-ink-soft font-bold">Замеры резервуара</div>
-          {defaultTankId && (
+          {selectedTankId && (
             <span className={'text-[10px] ' + (gridReady ? 'text-success' : 'text-warning')}>
               {gridReady ? `Градуировка: ${gridSize} точек` : 'Нет градуировки'}
             </span>
@@ -219,13 +276,12 @@ export function FuelSupplyQuickForm({ onDone, onCancel, defaultTankId = null, de
             onChange={(e) => setForm({ ...form, level_after_cm: e.target.value })}
           />
         </div>
-        {!defaultTankId && (
+        {!selectedTankId && (
           <div className="text-[11px] text-ink-soft">
-            Открой форму из конкретного резервуара, чтобы пересчёт см → литры
-            считался по его градуировочной таблице.
+            Выберите резервуар, чтобы пересчёт см → литры считался по его градуировочной таблице.
           </div>
         )}
-        {defaultTankId && !gridReady && (
+        {selectedTankId && !gridReady && (
           <div className="text-[11px] text-warning">
             Заполни «Градуировочная таблица» (Меню → Справочники), чтобы расхождение по замерам считалось автоматически.
           </div>

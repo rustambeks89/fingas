@@ -304,6 +304,7 @@ export default function CashflowScreen() {
     setEditErr('');
     try {
       await deleteCashflowWithSync(editingRow.id);
+      window.dispatchEvent(new Event('fingas-data-changed'));
       setEditingRow(null);
       await load();
     } catch (e) {
@@ -319,6 +320,7 @@ export default function CashflowScreen() {
     setEditErr('');
     try {
       await deleteCashflowWithSync(row.id);
+      window.dispatchEvent(new Event('fingas-data-changed'));
       await load();
     } catch (e) {
       setEditErr(e?.message ?? 'Не удалось удалить операцию.');

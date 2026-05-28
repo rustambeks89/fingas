@@ -122,6 +122,7 @@ export function QuickAddSheet({ open, onClose }) {
   }
 
   function handleDone() {
+    window.dispatchEvent(new Event('fingas-data-changed'));
     closeSheet();
   }
 

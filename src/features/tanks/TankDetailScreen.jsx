@@ -257,13 +257,21 @@ export default function TankDetailScreen() {
         tank={tank}
         fuelCode={fuelCode}
         onClose={() => setAddOpen(false)}
-        onDone={async () => { setAddOpen(false); await loadOps(); }}
+        onDone={async () => {
+          setAddOpen(false);
+          window.dispatchEvent(new Event('fingas-data-changed'));
+          await loadOps();
+        }}
       />
 
       <EditSheet
         editing={editing}
         onClose={() => setEditing(null)}
-        onDone={async () => { setEditing(null); await loadOps(); }}
+        onDone={async () => {
+          setEditing(null);
+          window.dispatchEvent(new Event('fingas-data-changed'));
+          await loadOps();
+        }}
       />
     </div>
   );

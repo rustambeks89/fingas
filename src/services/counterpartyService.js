@@ -58,6 +58,8 @@ export async function getCounterparty(id) {
 
 // Returns supplier statement: list of supplies (positive) + payments (negative)
 // in date-desc order with running balance.
+// Reads payments from cashflow (source of truth) so deleted cashflow entries
+// are immediately reflected here without depending on trigger cascade.
 export async function getSupplierStatement(supplierId) {
   const [supplies, payments] = await Promise.all([
     supabase
@@ -66,9 +68,10 @@ export async function getSupplierStatement(supplierId) {
       .eq('supplier_id', supplierId)
       .order('date', { ascending: true }),
     supabase
-      .from('supplier_payments')
+      .from('cashflow')
       .select('id, date, amount, note')
-      .eq('supplier_id', supplierId)
+      .eq('counterparty_id', supplierId)
+      .eq('operation_type', 'supplier_payment')
       .order('date', { ascending: true }),
   ]);
 
@@ -100,6 +103,7 @@ export async function getSupplierStatement(supplierId) {
   }
   return events.reverse();
 }
+
 
 // ---- Bank accounts (несколько счетов на контрагента) ----
 
@@ -150,7 +154,30 @@ export async function deleteBankAccount(id) {
 }
 
 export async function paySupplier({ supplierId, organizationId, stationId, amount, date, note, userId }) {
-  const { data, error } = await supabase
+  // Step 1: Insert directly into cashflow (source of truth).
+  // We do NOT rely on the DB trigger (fingas_shadow_supplier_payment) because
+  // it may not be applied on the remote DB, causing the cashflow entry to be missing.
+  const { data: cfRow, error: cfErr } = await supabase
+    .from('cashflow')
+    .insert({
+      organization_id: organizationId,
+      station_id: stationId,
+      date,
+      operation_type: 'supplier_payment',
+      amount,
+      counterparty_id: supplierId,
+      note: note || null,
+      status: 'confirmed',
+      created_by: userId,
+      cashflow_category: 'Оплата поставщику',
+    })
+    .select('id')
+    .single();
+  if (cfErr) throw cfErr;
+
+  // Step 2: Insert into supplier_payments with cashflow_id already set
+  // so the shadow trigger (if it exists) skips re-inserting into cashflow.
+  const { data: spRow, error: spErr } = await supabase
     .from('supplier_payments')
     .insert({
       supplier_id: supplierId,
@@ -160,9 +187,27 @@ export async function paySupplier({ supplierId, organizationId, stationId, amoun
       date,
       note: note || null,
       created_by: userId,
+      cashflow_id: cfRow.id,
     })
     .select()
     .single();
-  if (error) throw error;
-  return data;
+  if (spErr) throw spErr;
+
+  // Step 3: Update counterparty balance directly (subtract payment amount).
+  // Read current balance then write new value — avoids supabase.raw() which
+  // is not available in the JS SDK.
+  const { data: cp } = await supabase
+    .from('counterparties')
+    .select('balance')
+    .eq('id', supplierId)
+    .single();
+  if (cp !== null && cp !== undefined) {
+    await supabase
+      .from('counterparties')
+      .update({ balance: Number(cp.balance ?? 0) - Number(amount) })
+      .eq('id', supplierId);
+  }
+
+  return spRow;
 }
+
