@@ -5,6 +5,7 @@
 // fill, %, status (ok / low / critical) and last-measurement freshness.
 
 import { supabase } from '@/lib/supabaseClient';
+import { resolveShopKey } from '@/lib/fingasUtils';
 
 function isMissingRelationError(error, relation) {
   const message = String(error?.message ?? '').toLowerCase();
@@ -75,16 +76,7 @@ export async function getTankStatuses({ organizationId, stationId } = {}) {
   const tanks = await listTanks({ organizationId, stationId, active: true });
   if (tanks.length === 0) return [];
 
-  // Resolve station → ShopKey
-  let shopKey = null;
-  if (stationId) {
-    const { data } = await supabase
-      .from('stations')
-      .select('external_station_id')
-      .eq('id', stationId)
-      .maybeSingle();
-    shopKey = data?.external_station_id ?? null;
-  }
+  const shopKey = await resolveShopKey(stationId);
 
   // Pull recent balance rows for the org's stations
   let q = supabase
@@ -238,16 +230,7 @@ export async function computePhysicalBalance(tank) {
   const stationId = tank.station_id;
   const fuelCode  = tank.fuel_code ?? tank.fuel_type?.code ?? null;
 
-  // resolve ShopKey for the station
-  let shopKey = null;
-  if (stationId) {
-    const { data } = await supabase
-      .from('stations')
-      .select('external_station_id')
-      .eq('id', stationId)
-      .maybeSingle();
-    shopKey = data?.external_station_id ?? null;
-  }
+  const shopKey = await resolveShopKey(stationId);
 
   // supplies
   let supplyQ = supabase

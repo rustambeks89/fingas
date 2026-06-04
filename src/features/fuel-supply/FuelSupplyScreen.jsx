@@ -15,7 +15,6 @@ import { Input, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/status/EmptyState';
 import { createFuelSupply, deleteFuelSupply, listFuelSupply, updateFuelSupply } from '@/services/fuelService';
 import { listCounterparties } from '@/services/counterpartyService';
-import { listStations } from '@/services/stationService';
 import { useAuth } from '@/hooks/useAuth';
 import { useOrgContext } from '@/hooks/useOrgContext';
 import { PullToRefresh } from '@/components/ui/PullToRefresh';

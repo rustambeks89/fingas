@@ -10,20 +10,27 @@ import { useAuth } from '@/hooks/useAuth';
 import { isActive } from '@/lib/permissions';
 import { PROFILE_STATUS } from '@/lib/constants';
 
-import { MobileLayout } from '@/components/layout/MobileLayout';
+// MobileLayout вынесен в lazy — он тянет framer-motion / BottomNav / TopBar.
+// До первого входа в авторизованную зону их не подгружаем — auth-экраны
+// рисуются мгновенно без лишнего JS.
+const MobileLayout = lazy(() =>
+  import('@/components/layout/MobileLayout').then((m) => ({ default: m.MobileLayout })),
+);
 import { LoadingScreen } from '@/components/status/LoadingScreen';
 import { AccessDenied } from '@/components/status/AccessDenied';
 
-// Auth screens are not lazy — they're the first thing user sees if not signed in.
+// LoginScreen — единственный auth-экран который пользователь видит сразу
+// после холодного старта без сессии. Его держим в первом бандле.
+// Все остальные auth/status-экраны (Register, Setup, Pending, ...) показываются
+// только после действий пользователя — их lazy, чтобы не раздувать index-chunk.
 import LoginScreen from '@/features/auth/LoginScreen';
-import RegisterScreen from '@/features/auth/RegisterScreen';
-import PendingApprovalScreen from '@/features/auth/PendingApprovalScreen';
-import SetupScreen from '@/features/auth/SetupScreen';
-import AccountSetupScreen from '@/features/auth/AccountSetupScreen';
+const RegisterScreen = lazy(() => import('@/features/auth/RegisterScreen'));
+const PendingApprovalScreen = lazy(() => import('@/features/auth/PendingApprovalScreen'));
+const SetupScreen = lazy(() => import('@/features/auth/SetupScreen'));
+const AccountSetupScreen = lazy(() => import('@/features/auth/AccountSetupScreen'));
 const DashboardScreen = lazy(() => import('@/features/dashboard/DashboardScreen'));
 
 // Everything else lazy.
-const EmployeesScreen = lazy(() => import('@/features/employees/EmployeesScreen'));
 const EmployeeDetailScreen = lazy(() => import('@/features/employees/EmployeeDetailScreen'));
 const EmployeePermissionsScreen = lazy(() => import('@/features/permissions/EmployeePermissionsScreen'));
 const ShiftsScreen = lazy(() => import('@/features/shifts/ShiftsScreen'));
@@ -66,11 +73,13 @@ function PrivateRoute({ children }) {
   const { user, loading, session, profileChecked, configured } = useAuth();
   const location = useLocation();
   if (!configured) return <SetupScreen />;
-  if (loading) return <LoadingScreen />;
-  if (!session) return <Navigate to="/login" replace state={{ from: location }} />;
-  // Session exists. Wait until we actually tried to load the profile.
+  // Если профиль уже есть (из localStorage-кэша) — UI рендерится сразу,
+  // не дожидаясь getSession. Validity сессии проверяется параллельно;
+  // если она не подтвердится — onAuthStateChange выкинет нас на /login.
+  const hasCachedUser = !!user?.profile && profileChecked;
+  if (loading && !hasCachedUser) return <LoadingScreen />;
+  if (!session && !hasCachedUser) return <Navigate to="/login" replace state={{ from: location }} />;
   if (!profileChecked) return <LoadingScreen />;
-  // Tried, but no profile row exists (or table is missing): show actionable screen.
   if (!user?.profile) return <AccountSetupScreen />;
   if (user.profile.status !== PROFILE_STATUS.ACTIVE) {
     return <Navigate to="/pending" replace />;

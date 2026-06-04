@@ -173,6 +173,10 @@ export default function CalibrationsScreen() {
       }
 
       setSaveSuccess(true);
+      // Дёргаем другие экраны (Sales, P&L, главная) чтобы они пересчитали
+      // выручку с учётом новой поверки — без этого Sales показывает старый
+      // gross-revenue до ручного refresh.
+      window.dispatchEvent(new Event('fingas-data-changed'));
       setTimeout(() => {
         setSaveSuccess(false);
         setShowFormSheet(false);
@@ -202,6 +206,7 @@ export default function CalibrationsScreen() {
         .eq('source_id', String(saleId));
       if (error) throw error;
       await loadData();
+      window.dispatchEvent(new Event('fingas-data-changed'));
     } catch (e) {
       setErr(e?.message ?? 'Не удалось вернуть транзакцию в учет.');
     } finally {
@@ -238,6 +243,7 @@ export default function CalibrationsScreen() {
       });
       setEditingCalibration(null);
       await loadData();
+      window.dispatchEvent(new Event('fingas-data-changed'));
     } catch (e) {
       setErr(e?.message ?? 'Не удалось сохранить поверку.');
     } finally {
@@ -254,6 +260,7 @@ export default function CalibrationsScreen() {
       await deleteCalibration(editingCalibration.id);
       setEditingCalibration(null);
       await loadData();
+      window.dispatchEvent(new Event('fingas-data-changed'));
     } catch (e) {
       setErr(e?.message ?? 'Не удалось удалить поверку.');
     } finally {
@@ -268,6 +275,7 @@ export default function CalibrationsScreen() {
     try {
       await deleteCalibration(calibration.id);
       await loadData();
+      window.dispatchEvent(new Event('fingas-data-changed'));
     } catch (e) {
       setErr(e?.message ?? 'Не удалось удалить поверку.');
     } finally {

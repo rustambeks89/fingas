@@ -8,7 +8,16 @@
 // back-compat but should not be used in new flows.
 
 import { supabase } from '@/lib/supabaseClient';
-import { aggregateByShift, listSales } from './salesService';
+import { aggregateByShift, applyCalibrationDeductionsToSalesRows, listSales } from './salesService';
+import {
+  safeParseDate,
+  localYMD,
+  normalizeFuel,
+  resolveShopKey,
+} from '@/lib/fingasUtils';
+
+// Re-exported for external consumers that previously imported these from here.
+export { safeParseDate, normalizeFuel };
 
 // ===========================================================================
 // SHIFTS FROM azs_balance (TRK totalizers) — primary source of truth.
@@ -43,33 +52,6 @@ const COUNTER_FLOOR = 1_000_000;
 const SHIFT_HISTORY_FLOOR = 631;
 const SHIFT_KEY_CHUNK = 200;
 
-export function safeParseDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  let str = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-    const parts = str.split('-');
-    return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-  }
-  if (str.includes('-') && str.includes(' ')) {
-    str = str.replace(' ', 'T');
-  }
-  const d = new Date(str);
-  if (!Number.isNaN(d.getTime())) return d;
-  const d2 = new Date(str.replace(/-/g, '/'));
-  if (!Number.isNaN(d2.getTime())) return d2;
-  return null;
-}
-
-async function resolveShopKey(stationId) {
-  if (!stationId) return null;
-  const { data } = await supabase
-    .from('stations')
-    .select('external_station_id')
-    .eq('id', stationId)
-    .maybeSingle();
-  return data?.external_station_id ?? null;
-}
 
 function pickBalanceTimestamp(row) {
   if (!row) return null;
@@ -423,6 +405,9 @@ export async function listShiftsFromBalance({ stationId, from, to, limit = 50, l
       if (dateBounds.min && dateBounds.max) {
         const calFromDate = localYMD(new Date(dateBounds.min.getTime() - 86400000));
         const calToDate   = localYMD(new Date(dateBounds.max.getTime() + 86400000));
+        // shiftService needs per-row date/time/fuel (matched against the
+        // shift's own start/end interval), so it can't rely on the
+        // aggregated `day:fuel` map that salesService uses. Direct read.
         const { data: calRows } = await supabase
           .from('calibrations')
           .select('date, time, fuel, volume')
@@ -517,15 +502,6 @@ export async function getCurrentShiftFromBalance({ stationId } = {}) {
 // Каждая смена даёт (EndBalance−BeginBalance)×EndPrice по каждой марке топлива.
 // Дата атрибуции — DatetimeShiftBegin (из azs_shift), а не synced_at.
 // =============================================================================
-
-function localYMD(value) {
-  const d = safeParseDate(value);
-  if (!d) return null;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
 
 export async function aggregateBalanceByDay({ stationId, from, to } = {}) {
   const shifts = await listShiftsFromBalance({ stationId, from, to, limit: 5000, loadCounts: false });
@@ -666,31 +642,41 @@ export async function getCurrentSalesShift({ stationId } = {}) {
   if (currentKey == null) return null;
 
   // Pull only rows of the current shift, and only the columns we aggregate.
+  // Лимит 2000 — типичная смена редко превышает 500 транзакций; 2000 даёт
+  // buffer для оживлённых станций и заметно ускоряет холодное открытие
+  // (раньше тянули до 5000 = ~150KB JSON).
   const matched = await listSales({
     stationId,
     shiftKey: currentKey,
-    limit: 5000,
+    limit: 2000,
     columns: 'ShiftKey, ShopKey, FuelName, Volume, ShopCost, TransactionDatetime, OperatorName',
   });
   if (matched.length === 0) return null;
 
-  let revenue = 0, liters = 0;
-  const fuels = {};
   let firstAt = matched[0].TransactionDatetime;
   let lastAt  = matched[0].TransactionDatetime;
+  for (const r of matched) {
+    if (r.TransactionDatetime < firstAt) firstAt = r.TransactionDatetime;
+    if (r.TransactionDatetime > lastAt)  lastAt  = r.TransactionDatetime;
+  }
+
+  const adjusted = await applyCalibrationDeductionsToSalesRows({
+    stationId,
+    from: firstAt,
+    to: lastAt,
+    rows: matched,
+  });
+
+  const fuels = {};
   const operator = matched[0].OperatorName ?? '—';
   const shopKey = matched[0].ShopKey ?? null;
-  for (const r of matched) {
+  for (const r of adjusted.rows) {
     const rowRevenue = Number(r.ShopCost ?? 0);
     const rowLiters = Number(r.Volume ?? 0);
-    revenue += rowRevenue;
-    liters  += rowLiters;
     const f = r.FuelName ?? '—';
     if (!fuels[f]) fuels[f] = { liters: 0, revenue: 0 };
     fuels[f].liters += rowLiters;
     fuels[f].revenue += rowRevenue;
-    if (r.TransactionDatetime < firstAt) firstAt = r.TransactionDatetime;
-    if (r.TransactionDatetime > lastAt)  lastAt  = r.TransactionDatetime;
   }
 
   const { data: report } = await supabase
@@ -706,12 +692,14 @@ export async function getCurrentSalesShift({ stationId } = {}) {
     operatorOriginal: operator,
     operatorOverride: null,
     operatorFinal: operator,
-    revenue,
-    liters,
+    revenue: adjusted.revenue,
+    liters: adjusted.liters,
     count: matched.length,
     firstAt,
     lastAt,
     fuels,
+    calibrationDeducted: adjusted.calibrationLiters,
+    calibrationDeductedRevenue: adjusted.calibrationRevenue,
     parts: 1,
     mergedKeys: [currentKey],
     report: report ?? null,
@@ -1026,11 +1014,3 @@ export async function updateShiftReport(reportId, patch) {
   return data;
 }
 
-export function normalizeFuel(name) {
-  const n = String(name ?? '').trim().toUpperCase().replace(/\s+/g, '');
-  if (['92Е5', '92E5', 'АИ95', 'АИ-95'].includes(n)) return 'АИ-95';
-  if (['АИ92', 'АИ-92'].includes(n)) return 'АИ-92';
-  if (['ДТ', 'DIESEL', 'ДИЗЕЛЬ', 'ДТ ЛЕТО', 'ДТ ЗИМА'].includes(n)) return 'ДТ';
-  if (['СУГ', 'ГАЗ', 'LPG'].includes(n)) return 'СУГ';
-  return n;
-}

@@ -20,7 +20,6 @@ import {
   Wallet,
   Wrench,
   ChevronLeft,
-  Sparkles,
 } from 'lucide-react';
 import { BottomSheet } from './BottomSheet';
 import { Badge } from '@/components/ui/Badge';

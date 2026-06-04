@@ -12,36 +12,18 @@
 // public.stations.external_station_id (integer).
 
 import { supabase } from '@/lib/supabaseClient';
+import {
+  safeParseDate,
+  localYMD,
+  localYM,
+  numberOrZero,
+  normalizeFuel,
+  resolveShopKey,
+  loadCalibrationsMap,
+} from '@/lib/fingasUtils';
 
-export function safeParseDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  let str = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-    const parts = str.split('-');
-    return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-  }
-  if (str.includes('-') && str.includes(' ')) {
-    str = str.replace(' ', 'T');
-  }
-  const d = new Date(str);
-  if (!Number.isNaN(d.getTime())) return d;
-  const d2 = new Date(str.replace(/-/g, '/'));
-  if (!Number.isNaN(d2.getTime())) return d2;
-  return null;
-}
-
-// Internal: resolve station UUID → external ShopKey integer.
-async function resolveShopKey(stationId) {
-  if (!stationId) return null;
-  const { data, error } = await supabase
-    .from('stations')
-    .select('external_station_id')
-    .eq('id', stationId)
-    .maybeSingle();
-  if (error) return null;
-  return data?.external_station_id ?? null;
-}
+// Re-exported for external consumers that previously imported these from here.
+export { safeParseDate, normalizeFuel };
 
 // Page through raw sales rows. When `stationId` is given, we look up the
 // matching ShopKey and filter; otherwise we return rows for ALL ShopKeys the
@@ -62,75 +44,177 @@ export async function listSales({ stationId, from, to, shiftKey, limit = 200, co
   return data ?? [];
 }
 
+function getRowDateTime(row) {
+  return row?.TransactionDatetime ?? row?.transaction_datetime ?? null;
+}
+
+function getRowFuel(row) {
+  return row?.FuelName ?? row?.fuel_name ?? null;
+}
+
+function getRowVolume(row) {
+  return row?.Volume ?? row?.volume ?? 0;
+}
+
+function getRowRevenue(row) {
+  return row?.ShopCost ?? row?.shop_cost ?? 0;
+}
+
+export async function applyCalibrationDeductionsToSalesRows({ stationId, from, to, rows = [] } = {}) {
+  const indexedRows = (rows ?? []).map((row, index) => ({ row, index }));
+  if (indexedRows.length === 0) {
+    return {
+      rows: [],
+      revenue: 0,
+      liters: 0,
+      grossRevenue: 0,
+      grossLiters: 0,
+      calibrationRevenue: 0,
+      calibrationLiters: 0,
+    };
+  }
+
+  let grossRevenue = 0;
+  let grossLiters = 0;
+  for (const item of indexedRows) {
+    grossRevenue += numberOrZero(getRowRevenue(item.row));
+    grossLiters += numberOrZero(getRowVolume(item.row));
+  }
+
+  if (!stationId) {
+    return {
+      rows: indexedRows.map((item) => ({ ...item.row })),
+      revenue: grossRevenue,
+      liters: grossLiters,
+      grossRevenue,
+      grossLiters,
+      calibrationRevenue: 0,
+      calibrationLiters: 0,
+    };
+  }
+
+  const bounds = {
+    min: from ? safeParseDate(from) : null,
+    max: to ? safeParseDate(to) : null,
+  };
+  if (!bounds.min || !bounds.max) {
+    for (const item of indexedRows) {
+      const dt = safeParseDate(getRowDateTime(item.row));
+      if (!dt) continue;
+      if (!bounds.min || dt < bounds.min) bounds.min = dt;
+      if (!bounds.max || dt > bounds.max) bounds.max = dt;
+    }
+  }
+
+  const calMap = bounds.min && bounds.max
+    ? await loadCalibrationsMap({
+        stationId,
+        fromDate: localYMD(bounds.min),
+        toDate: localYMD(bounds.max),
+      })
+    : new Map();
+
+  if (calMap.size === 0) {
+    return {
+      rows: indexedRows.map((item) => ({ ...item.row })),
+      revenue: grossRevenue,
+      liters: grossLiters,
+      grossRevenue,
+      grossLiters,
+      calibrationRevenue: 0,
+      calibrationLiters: 0,
+    };
+  }
+
+  const chronological = indexedRows
+    .map((item) => ({
+      ...item,
+      ts: safeParseDate(getRowDateTime(item.row))?.getTime() ?? null,
+    }))
+    .sort((a, b) => {
+      if (a.ts == null && b.ts == null) return a.index - b.index;
+      if (a.ts == null) return -1;
+      if (b.ts == null) return 1;
+      if (a.ts === b.ts) return a.index - b.index;
+      return a.ts - b.ts;
+    });
+
+  const adjustedByIndex = new Map();
+  let netRevenue = 0;
+  let netLiters = 0;
+  for (const item of chronological) {
+    const baseRow = item.row;
+    const originalVolume = numberOrZero(getRowVolume(baseRow));
+    const originalRevenue = numberOrZero(getRowRevenue(baseRow));
+    let volume = originalVolume;
+    let revenue = originalRevenue;
+    let calibrationDeductedVolume = 0;
+    let calibrationDeductedRevenue = 0;
+
+    const day = localYMD(getRowDateTime(baseRow));
+    const fuel = normalizeFuel(getRowFuel(baseRow));
+    if (day && fuel && volume > 0) {
+      const key = `${day}:${fuel}`;
+      const debt = numberOrZero(calMap.get(key));
+      if (debt > 0) {
+        const deduct = Math.min(volume, debt);
+        const price = originalVolume > 0 ? originalRevenue / originalVolume : 0;
+        volume = Math.max(0, originalVolume - deduct);
+        revenue = volume * price;
+        calibrationDeductedVolume = deduct;
+        calibrationDeductedRevenue = originalRevenue - revenue;
+        calMap.set(key, debt - deduct);
+      }
+    }
+
+    adjustedByIndex.set(item.index, {
+      ...baseRow,
+      Volume: volume,
+      ShopCost: revenue,
+      grossVolume: originalVolume,
+      grossShopCost: originalRevenue,
+      calibrationDeductedVolume,
+      calibrationDeductedRevenue,
+    });
+    netRevenue += revenue;
+    netLiters += volume;
+  }
+
+  const adjustedRows = indexedRows.map((item) => adjustedByIndex.get(item.index) ?? { ...item.row });
+  return {
+    rows: adjustedRows,
+    revenue: netRevenue,
+    liters: netLiters,
+    grossRevenue,
+    grossLiters,
+    calibrationRevenue: grossRevenue - netRevenue,
+    calibrationLiters: grossLiters - netLiters,
+  };
+}
+
 // Aggregate revenue + liters for a shift window. Из суммы продаж
 // вычитаются поверочные проливы (calibrations) за тот же период по тому
 // же баку — топливо возвращается в резервуар и не считается реальной
 // выручкой. Цена литра берётся как средняя по azs_selling за период.
 export async function aggregateForShift({ stationId, from, to } = {}) {
-  const rows = await listSales({ stationId, from, to, limit: 50000 });
-  let revenue = 0;
-  let liters = 0;
-  // Средняя цена за литр по каждой марке за период — нужна чтобы
-  // снять выручку пропорционально поверке.
-  const perFuel = new Map(); // fuel -> { liters, revenue }
-  for (const r of rows) {
-    const cost = Number(r.ShopCost ?? 0);
-    const vol  = Number(r.Volume   ?? 0);
-    revenue += cost;
-    liters  += vol;
-    const fuel = normalizeFuel(r.FuelName);
-    if (fuel) {
-      const g = perFuel.get(fuel) ?? { liters: 0, revenue: 0 };
-      g.liters  += vol;
-      g.revenue += cost;
-      perFuel.set(fuel, g);
-    }
-  }
-
-  let calibrationLiters = 0;
-  let calibrationRevenue = 0;
-  if (stationId && from && to) {
-    try {
-      const fromDate = String(from).slice(0, 10);
-      const toDate   = String(to).slice(0, 10);
-      const { data: calRows } = await supabase
-        .from('calibrations')
-        .select('fuel, volume')
-        .eq('station_id', stationId)
-        .gte('date', fromDate)
-        .lte('date', toDate);
-      for (const c of calRows ?? []) {
-        const fuel = normalizeFuel(c.fuel);
-        const v    = Number(c.volume ?? 0);
-        if (!fuel || !(v > 0)) continue;
-        const g = perFuel.get(fuel);
-        if (!g || !(g.liters > 0)) continue;
-        const deduct = Math.min(g.liters, v);
-        const price  = g.revenue / g.liters;
-        
-        const originalLiters = g.liters;
-        const originalRevenue = g.revenue;
-        
-        g.liters = Math.max(0, originalLiters - deduct);
-        g.revenue = g.liters * price;
-        
-        calibrationLiters  += (originalLiters - g.liters);
-        calibrationRevenue += (originalRevenue - g.revenue);
-      }
-    } catch (e) {
-      console.warn('[salesService] aggregateForShift calibration deduction failed:', e?.message ?? e);
-    }
-  }
+  const rows = await listSales({
+    stationId,
+    from,
+    to,
+    limit: 50000,
+    columns: 'TransactionDatetime, FuelName, Volume, ShopCost, ShiftKey, ShopKey, OperatorName, BasePaymentTypeKey',
+  });
+  const adjusted = await applyCalibrationDeductionsToSalesRows({ stationId, from, to, rows });
 
   return {
-    revenue: revenue - calibrationRevenue,
-    liters:  liters  - calibrationLiters,
-    count:   rows.length,
-    rows,
-    calibrationLiters,
-    calibrationRevenue,
-    grossRevenue: revenue,
-    grossLiters:  liters,
+    revenue: adjusted.revenue,
+    liters: adjusted.liters,
+    count: adjusted.rows.length,
+    rows: adjusted.rows,
+    calibrationLiters: adjusted.calibrationLiters,
+    calibrationRevenue: adjusted.calibrationRevenue,
+    grossRevenue: adjusted.grossRevenue,
+    grossLiters: adjusted.grossLiters,
   };
 }
 
@@ -158,27 +242,17 @@ export async function computeFifoCost({ stationId, from, to }) {
     .limit(50000);
   if (shopKey != null) salesQ = salesQ.eq('ShopKey', shopKey);
 
-  let calQ = supabase
-    .from('calibrations')
-    .select('date, fuel, volume')
-    .gte('date', fromHist.slice(0, 10))
-    .lte('date', to.slice(0, 10));
-  if (stationId) calQ = calQ.eq('station_id', stationId);
-
-  const [suppliesQ, salesR, calR] = await Promise.all([supplyQ, salesQ, calQ]);
+  const [suppliesQ, salesR, calMap] = await Promise.all([
+    supplyQ,
+    salesQ,
+    loadCalibrationsMap({
+      stationId,
+      fromDate: fromHist.slice(0, 10),
+      toDate: String(to).slice(0, 10),
+    }),
+  ]);
   const supplies = suppliesQ.data ?? [];
   const sales = salesR.data ?? [];
-  const calRows = calR.data ?? [];
-
-  const calMap = new Map();
-  for (const c of calRows) {
-    const day = String(c.date ?? '').slice(0, 10);
-    const fuel = normalizeFuel(c.fuel);
-    const v = Number(c.volume ?? 0);
-    if (!day || !fuel || !(v > 0)) continue;
-    const key = `${day}:${fuel}`;
-    calMap.set(key, (calMap.get(key) ?? 0) + v);
-  }
 
   const layers = new Map();
   let si = 0;
@@ -240,29 +314,11 @@ export async function aggregateByFuel({ stationId, from, to } = {}) {
     columns: 'FuelName, ShopCost, Volume, TransactionDatetime',
   });
 
-  const calMap = new Map();
-  if (stationId && from && to) {
-    try {
-      const fromDate = String(from).slice(0, 10);
-      const toDate = String(to).slice(0, 10);
-      const { data: calRows } = await supabase
-        .from('calibrations')
-        .select('date, fuel, volume')
-        .eq('station_id', stationId)
-        .gte('date', fromDate)
-        .lte('date', toDate);
-      for (const c of calRows ?? []) {
-        const day = String(c.date ?? '').slice(0, 10);
-        const fuel = normalizeFuel(c.fuel);
-        const v = Number(c.volume ?? 0);
-        if (!day || !fuel || !(v > 0)) continue;
-        const key = `${day}:${fuel}`;
-        calMap.set(key, (calMap.get(key) ?? 0) + v);
-      }
-    } catch (e) {
-      console.warn('[salesService] aggregateByFuel calibrations load failed:', e?.message ?? e);
-    }
-  }
+  const calMap = await loadCalibrationsMap({
+    stationId,
+    fromDate: from ? String(from).slice(0, 10) : null,
+    toDate: to ? String(to).slice(0, 10) : null,
+  });
 
   const map = new Map();
   for (const r of rows) {
@@ -301,10 +357,11 @@ const PAYMENT_LABELS = {
 export async function aggregateByPaymentType({ stationId, from, to } = {}) {
   const rows = await listSales({
     stationId, from, to, limit: 5000,
-    columns: 'BasePaymentTypeKey, ShopCost',
+    columns: 'BasePaymentTypeKey, ShopCost, Volume, FuelName, TransactionDatetime',
   });
+  const adjusted = await applyCalibrationDeductionsToSalesRows({ stationId, from, to, rows });
   const map = new Map();
-  for (const r of rows) {
+  for (const r of adjusted.rows) {
     const k = String(r.BasePaymentTypeKey ?? '—');
     if (!map.has(k)) map.set(k, { key: k, label: PAYMENT_LABELS[k] ?? `Тип ${k}`, revenue: 0, count: 0 });
     const g = map.get(k);
@@ -321,8 +378,9 @@ export async function aggregateByShift({ stationId, from, to, limit = 20 } = {})
     stationId, from, to, limit: 10000,
     columns: 'ShiftKey, OperatorName, ShopCost, Volume, TransactionDatetime, FuelName',
   });
+  const adjusted = await applyCalibrationDeductionsToSalesRows({ stationId, from, to, rows });
   const map = new Map();
-  for (const r of rows) {
+  for (const r of adjusted.rows) {
     const key = r.ShiftKey ?? '—';
     if (!map.has(key)) {
       map.set(key, {
@@ -354,28 +412,17 @@ export async function aggregateByShift({ stationId, from, to, limit = 20 } = {})
 // TransactionDatetime приходит из БД в UTC ("...+00"). Чтобы группировать
 // по локальному дню/месяцу (так привычно пользователю), парсим в Date и
 // берём local-год/месяц/число — иначе ночные транзакции (UTC < 06:00 для
-// UTC+6) попадают в предыдущий день.
-function localYMD(value) {
-  const d = safeParseDate(value);
-  if (!d) return null;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function localYM(value) {
-  const ymd = localYMD(value);
-  return ymd ? ymd.slice(0, 7) : null;
-}
+// UTC+6) попадают в предыдущий день. localYM / localYMD теперь живут в
+// '@/lib/fingasUtils'.
 
 export async function aggregateByDay({ stationId, from, to } = {}) {
   const rows = await listSales({
     stationId, from, to, limit: 50000,
-    columns: 'TransactionDatetime, ShopCost, Volume',
+    columns: 'TransactionDatetime, ShopCost, Volume, FuelName',
   });
+  const adjusted = await applyCalibrationDeductionsToSalesRows({ stationId, from, to, rows });
   const map = new Map();
-  for (const r of rows) {
+  for (const r of adjusted.rows) {
     const dt = localYMD(r.TransactionDatetime);
     if (!dt) continue;
     if (!map.has(dt)) {
@@ -402,10 +449,11 @@ export async function aggregateByDay({ stationId, from, to } = {}) {
 export async function aggregateByMonth({ stationId, from, to } = {}) {
   const rows = await listSales({
     stationId, from, to, limit: 200000,
-    columns: 'TransactionDatetime, ShopCost, Volume',
+    columns: 'TransactionDatetime, ShopCost, Volume, FuelName',
   });
+  const adjusted = await applyCalibrationDeductionsToSalesRows({ stationId, from, to, rows });
   const map = new Map();
-  for (const r of rows) {
+  for (const r of adjusted.rows) {
     const ym = localYM(r.TransactionDatetime);
     if (!ym) continue;
     if (!map.has(ym)) {
@@ -429,11 +477,18 @@ export async function aggregateByMonth({ stationId, from, to } = {}) {
 
 // Hour-of-day × weekday heatmap: returns 7×24 matrix of revenue.
 export async function aggregateHourHeatmap({ stationId, from, to } = {}) {
-  const rows = await listSales({ stationId, from, to, limit: 20000 });
+  const rows = await listSales({
+    stationId,
+    from,
+    to,
+    limit: 20000,
+    columns: 'TransactionDatetime, ShopCost, Volume, FuelName',
+  });
+  const adjusted = await applyCalibrationDeductionsToSalesRows({ stationId, from, to, rows });
   // matrix[dow][hour] = revenue
   const matrix = Array.from({ length: 7 }, () => Array(24).fill(0));
   let max = 0;
-  for (const r of rows) {
+  for (const r of adjusted.rows) {
     const d = r.TransactionDatetime ? new Date(r.TransactionDatetime) : null;
     if (!d || isNaN(d)) continue;
     // ru week: mon=0 .. sun=6
@@ -449,10 +504,11 @@ export async function aggregateHourHeatmap({ stationId, from, to } = {}) {
 export async function aggregateByOperator({ stationId, from, to, limit = 10 } = {}) {
   const rows = await listSales({
     stationId, from, to, limit: 50000,
-    columns: 'OperatorName, ShopCost, Volume, ShiftKey',
+    columns: 'OperatorName, ShopCost, Volume, ShiftKey, FuelName, TransactionDatetime',
   });
+  const adjusted = await applyCalibrationDeductionsToSalesRows({ stationId, from, to, rows });
   const map = new Map();
-  for (const r of rows) {
+  for (const r of adjusted.rows) {
     const op = r.OperatorName ?? '—';
     if (!map.has(op)) map.set(op, { operator: op, revenue: 0, liters: 0, count: 0, shifts: new Set() });
     const g = map.get(op);
@@ -471,10 +527,11 @@ export async function aggregateByOperator({ stationId, from, to, limit = 10 } = 
 export async function aggregateByHour({ stationId, from, to } = {}) {
   const rows = await listSales({
     stationId, from, to, limit: 50000,
-    columns: 'TransactionDatetime, ShopCost',
+    columns: 'TransactionDatetime, ShopCost, Volume, FuelName',
   });
+  const adjusted = await applyCalibrationDeductionsToSalesRows({ stationId, from, to, rows });
   const bins = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: `${h}:00`, revenue: 0, count: 0 }));
-  for (const r of rows) {
+  for (const r of adjusted.rows) {
     const d = r.TransactionDatetime ? new Date(r.TransactionDatetime) : null;
     if (!d || isNaN(d)) continue;
     const h = d.getHours();
@@ -500,11 +557,3 @@ export async function compareWindows({ stationId, currentFrom, currentTo, priorF
   };
 }
 
-export function normalizeFuel(name) {
-  const n = String(name ?? '').trim().toUpperCase().replace(/\s+/g, '');
-  if (['92Е5', '92E5', 'АИ95', 'АИ-95'].includes(n)) return 'АИ-95';
-  if (['АИ92', 'АИ-92'].includes(n)) return 'АИ-92';
-  if (['ДТ', 'DIESEL', 'ДИЗЕЛЬ', 'ДТ ЛЕТО', 'ДТ ЗИМА'].includes(n)) return 'ДТ';
-  if (['СУГ', 'ГАЗ', 'LPG'].includes(n)) return 'СУГ';
-  return n;
-}

@@ -177,3 +177,26 @@
   animation: shimmer 1.6s infinite;
 }
 
+/* Performance profile for low-end devices */
+html.perf-lite .backdrop-blur-sm,
+html.perf-lite .backdrop-blur,
+html.perf-lite .backdrop-blur-md,
+html.perf-lite .backdrop-blur-lg,
+html.perf-lite .backdrop-blur-xl,
+html.perf-lite .backdrop-blur-2xl,
+html.perf-lite .backdrop-blur-3xl {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.perf-lite .glass,
+html.perf-lite .glass-premium,
+html.perf-lite [class*='shadow-'] {
+  box-shadow: none !important;
+}
+
+html.perf-lite .animate-pulse,
+html.perf-lite .animate-ping,
+html.perf-lite .animate-shimmer {
+  animation: none !important;
+}

@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bell, CheckCheck, Loader2, X } from 'lucide-react';
+import { Bell, CheckCheck, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '@/components/ui/Avatar';
 import { Wordmark } from '@/components/ui/Logo';
@@ -179,7 +179,7 @@ export function TopBar() {
 
   return (
     <>
-      <header className="sticky top-0 z-20 border-b border-transparent safe-top bg-bg-card/85 backdrop-blur-xl">
+      <header className="sticky top-0 z-20 border-b border-line/40 safe-top bg-bg-card backdrop-blur-xl">
         <div className="max-w-screen-sm mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex-1 min-w-0">
             <div className="flex items-center select-none">
@@ -193,10 +193,10 @@ export function TopBar() {
               type="button"
               onClick={() => {
                 setIsOpen(true);
-                load(); // Reload on open to ensure fresh data
+                load();
               }}
               onDoubleClick={handleTestNotification}
-              className="w-10 h-10 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center text-white/70 hover:text-white transition-colors relative cursor-pointer"
+              className="w-10 h-10 rounded-xl border border-line/40 bg-bg-elevated/60 flex items-center justify-center text-ink hover:text-brand-400 transition-colors relative cursor-pointer"
               aria-label="Уведомления"
               title="Двойной клик для теста звука и WhatsApp-уведомления"
             >

@@ -75,7 +75,7 @@ export default function TankDetailScreen() {
 
   const fuelCode = useMemo(() => tank?.fuel_type?.code ?? tank?.fuel_code ?? null, [tank]);
 
-  const loadOps = useCallback(async () => {
+  const loadOps = useCallback(async (signal) => {
     if (!tank) return;
     setLoading(true);
     try {
@@ -86,7 +86,9 @@ export default function TankDetailScreen() {
         listAdjustments({ tankId, organizationId: orgId, stationId: tank.station_id }).catch(() => []),
         computePhysicalBalance(tank).catch(() => null),
       ]);
-      // фильтр по баку: либо по tank_id, либо по fuel_type если tank_id не записан
+      // Если за время загрузки пользователь переключился на другой бак —
+      // не перезаписываем state свежей карточки старыми данными.
+      if (signal?.cancelled) return;
       const byTank = (row, fuelField) =>
         row.tank_id === tankId ||
         (!row.tank_id && fuelCode && (row[fuelField] === fuelCode));
@@ -96,7 +98,7 @@ export default function TankDetailScreen() {
       setAdjustments(adj);
       setBalance(bal);
     } finally {
-      setLoading(false);
+      if (!signal?.cancelled) setLoading(false);
     }
   }, [tank, tankId, orgId, fuelCode]);
 
@@ -106,7 +108,11 @@ export default function TankDetailScreen() {
     return () => { cancelled = true; };
   }, [tankId]);
 
-  useEffect(() => { loadOps(); }, [loadOps]);
+  useEffect(() => {
+    const signal = { cancelled: false };
+    loadOps(signal);
+    return () => { signal.cancelled = true; };
+  }, [loadOps]);
 
   if (!tank) {
     return (

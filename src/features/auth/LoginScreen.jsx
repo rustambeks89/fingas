@@ -4,7 +4,6 @@
 
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Wordmark } from '@/components/ui/Logo';
@@ -41,12 +40,7 @@ export default function LoginScreen() {
       <div className="pointer-events-none absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-brand-500/10 dark:bg-brand-500/5 blur-[120px]" />
       <div className="pointer-events-none absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full bg-info/10 dark:bg-info/5 blur-[100px]" />
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-        className="relative w-full max-w-[390px] z-10"
-      >
+      <div className="relative w-full max-w-[390px] z-10 animate-slide-up">
         <div className="text-center mb-8 flex flex-col items-center justify-center">
           <Wordmark className="text-3xl font-black mx-auto mb-1.5" />
           <p className="text-xs text-ink-soft uppercase tracking-widest font-semibold">
@@ -98,7 +92,7 @@ export default function LoginScreen() {
           <Feature icon={TrendingUp} label="Финансы" />
           <Feature icon={ShieldCheck} label="Контроль" />
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }

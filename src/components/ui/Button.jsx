@@ -1,8 +1,13 @@
-// [UPDATED BY ANTIGRAVITY CLI - 2026-05-25]
+// [UPDATED BY CLAUDE CLI - 2026-06-04]
 // Project: Fingas
-// Purpose: Primary mobile button — large tap area, compressed luxury styling, modern variants.
+// Purpose: Primary mobile button — large tap area, compressed luxury styling.
+//
+// Раньше использовал framer-motion для whileTap-эффекта. Это тянуло
+// ~37KB gzip в каждый чанк, где есть Button (включая login!). Заменили
+// на чистый CSS active:scale-97 — анимация ощущается одинаково, но
+// первый бандл лёгкий и framer-motion подгружается только когда
+// пользователь зашёл в авторизованную зону.
 
-import { motion } from 'framer-motion';
 import { cn } from '@/lib/cn';
 
 const VARIANTS = {
@@ -34,11 +39,10 @@ export function Button({
   ...rest
 }) {
   return (
-    <motion.button
-      whileTap={{ scale: 0.97 }}
+    <button
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center gap-1.5 font-bold uppercase tracking-wider transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed',
+        'inline-flex items-center justify-center gap-1.5 font-bold uppercase tracking-wider transition-all duration-200 active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed',
         VARIANTS[variant],
         SIZES[size],
         className,
@@ -50,6 +54,6 @@ export function Button({
       ) : (
         children
       )}
-    </motion.button>
+    </button>
   );
 }

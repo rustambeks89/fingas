@@ -13,25 +13,14 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Bell,
-  Building2,
   ChevronRight,
-  ClipboardList,
   Droplets,
-  FileText,
-  Fuel,
   Gauge,
-  MapPin,
-  MessageSquare,
-  Receipt,
   Ruler,
   Settings,
-  ShieldCheck,
   Sparkles,
-  TrendingUp,
   Users,
   Wallet,
-  Wrench,
 } from 'lucide-react';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Card } from '@/components/ui/Card';
@@ -45,8 +34,6 @@ import {
   getCurrentSalesShift,
   listPendingShiftReports,
 } from '@/services/shiftService';
-import { formatMoney } from '@/lib/formatters';
-
 function buildSections(user, owner) {
   const can = (m) => owner || hasPermission(user, m, 'can_view');
 

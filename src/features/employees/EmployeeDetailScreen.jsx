@@ -28,7 +28,6 @@ import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/status/EmptyState';
 import { FormSheet } from '@/components/bottom-sheets/FormSheet';
-import { CollapsibleFilters } from '@/components/ui/CollapsibleFilters';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -588,58 +587,6 @@ function Row({ date, title, sub, right, onClick }) {
       </div>
       {right && <div className="flex-shrink-0">{right}</div>}
     </Tag>
-  );
-}
-
-function DateRangeFilter({ fromDate, toDate, onFromChange, onToChange, onPreset }) {
-  function preset(kind) {
-    const now = new Date();
-    const today = new Date(now); today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().slice(0, 10);
-    if (kind === 'today') return onPreset(todayStr, todayStr);
-    if (kind === 'week') {
-      const offsetToMonday = (today.getDay() + 6) % 7;
-      const wkStart = new Date(today.getTime() - offsetToMonday * 86400000);
-      return onPreset(wkStart.toISOString().slice(0, 10), todayStr);
-    }
-    if (kind === 'month') {
-      const m = new Date(today.getFullYear(), today.getMonth(), 1);
-      return onPreset(m.toISOString().slice(0, 10), todayStr);
-    }
-    if (kind === 'year') {
-      const y = new Date(today.getFullYear(), 0, 1);
-      return onPreset(y.toISOString().slice(0, 10), todayStr);
-    }
-    if (kind === 'all') return onPreset('', '');
-  }
-  return (
-    <div className="space-y-2.5">
-      <div className="flex items-center justify-between">
-        <div className="text-[10px] uppercase tracking-[0.18em] text-ink-soft font-bold">Период</div>
-        <div className="flex gap-1">
-          {[
-            { id: 'today', label: 'Сег' },
-            { id: 'week',  label: 'Нед' },
-            { id: 'month', label: 'Мес' },
-            { id: 'year',  label: 'Год' },
-            { id: 'all',   label: 'Все' },
-          ].map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => preset(p.id)}
-              className="h-7 px-2.5 rounded-lg text-[10px] font-bold border border-line bg-bg-elevated text-ink-muted hover:text-ink hover:border-brand-500/50 transition-colors"
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Input label="С" type="date" className="h-9 text-xs" value={fromDate} onChange={(e) => onFromChange(e.target.value)} />
-        <Input label="По" type="date" className="h-9 text-xs" value={toDate} onChange={(e) => onToChange(e.target.value)} />
-      </div>
-    </div>
   );
 }
 

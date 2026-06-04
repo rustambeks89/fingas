@@ -4,7 +4,20 @@
 
 import { supabase } from '@/lib/supabaseClient';
 
-export async function listCashflow({ stationId, operationType, status, limit = 100, fromDate } = {}) {
+export async function listCashflow({
+  stationId,
+  operationType,
+  status,
+  limit = 100,
+  fromDate,
+  toDate,
+  counterpartyId,
+  cashflowCategory,
+  paymentType,
+  walletId,
+  shiftSessionId,
+  createdBy,
+} = {}) {
   let q = supabase
     .from('cashflow')
     .select(`
@@ -19,6 +32,14 @@ export async function listCashflow({ stationId, operationType, status, limit = 1
   if (operationType) q = q.eq('operation_type', operationType);
   if (status) q = q.eq('status', status);
   if (fromDate) q = q.gte('date', fromDate);
+  if (toDate) q = q.lte('date', toDate);
+  if (counterpartyId) q = q.eq('counterparty_id', counterpartyId);
+  if (cashflowCategory) q = q.eq('cashflow_category', cashflowCategory);
+  if (paymentType) q = q.eq('payment_type', paymentType);
+  if (shiftSessionId) q = q.eq('shift_session_id', shiftSessionId);
+  if (createdBy) q = q.eq('created_by', createdBy);
+  // walletId — кошелёк замешан в две колонки (откуда/куда), поэтому ИЛИ.
+  if (walletId) q = q.or(`wallet_from.eq.${walletId},wallet_to.eq.${walletId}`);
   const { data, error } = await q;
   if (error) throw error;
   return data ?? [];

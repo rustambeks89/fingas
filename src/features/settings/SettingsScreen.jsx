@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Building2, ChevronRight, Layers3, MapPin, Monitor, Moon, Plus, Power, Sun, Users, ShieldCheck } from 'lucide-react';
+import { Building2, ChevronRight, Layers3, MapPin, Monitor, Moon, Plus, Power, Sun, ShieldCheck } from 'lucide-react';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';

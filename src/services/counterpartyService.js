@@ -69,7 +69,7 @@ export async function getSupplierStatement(supplierId) {
       .order('date', { ascending: true }),
     supabase
       .from('cashflow')
-      .select('id, date, amount, note')
+      .select('id, date, amount, note, wallet_from, payment_type, station_id')
       .eq('counterparty_id', supplierId)
       .eq('operation_type', 'supplier_payment')
       .order('date', { ascending: true }),
@@ -93,6 +93,10 @@ export async function getSupplierStatement(supplierId) {
       date: p.date,
       amount: -Number(p.amount ?? 0),
       detail: p.note ?? 'Оплата',
+      walletFrom: p.wallet_from ?? null,
+      paymentType: p.payment_type ?? null,
+      stationId: p.station_id ?? null,
+      note: p.note ?? '',
     })),
   ].sort((a, b) => a.date.localeCompare(b.date));
 
@@ -153,64 +157,46 @@ export async function deleteBankAccount(id) {
   if (error) throw error;
 }
 
-export async function paySupplier({ supplierId, organizationId, stationId, amount, date, note, userId }) {
-  // Step 1: Insert directly into cashflow (source of truth).
-  // Even if steps 2-3 fail, the payment is recorded and will show in cashflow.
-  const { data: cfRow, error: cfErr } = await supabase
-    .from('cashflow')
+// Запись оплаты поставщику. Единая точка входа — INSERT в supplier_payments;
+// серверные триггеры (миграции 0010/0036) сами создают cashflow-строку и
+// пересчитывают counterparties.balance. Прежняя реализация делала всё это
+// в JS параллельно с триггерами и удваивала уменьшение balance.
+export async function paySupplier({
+  supplierId,
+  organizationId,
+  stationId,
+  amount,
+  date,
+  note,
+  userId,
+  walletFrom = null,
+  paymentType = 'cash',
+}) {
+  // wallet_from / payment_type живут в cashflow, а в supplier_payments их
+  // нет — после вставки находим созданный триггером cashflow и обновляем.
+  const { data: row, error: insErr } = await supabase
+    .from('supplier_payments')
     .insert({
+      supplier_id: supplierId,
       organization_id: organizationId,
       station_id: stationId,
-      date,
-      operation_type: 'supplier_payment',
       amount,
-      counterparty_id: supplierId,
+      date,
       note: note || null,
-      status: 'confirmed',
       created_by: userId,
-      cashflow_category: 'Оплата поставщику',
     })
-    .select('id')
+    .select('id, cashflow_id')
     .single();
-  if (cfErr) throw cfErr; // Step 1 is critical — throw if cashflow insert fails
+  if (insErr) throw insErr;
 
-  // Step 2: Sync to supplier_payments (non-critical — cashflow is source of truth).
-  // May fail if cashflow_id column not yet migrated on remote DB — that's fine.
-  try {
-    await supabase
-      .from('supplier_payments')
-      .insert({
-        supplier_id: supplierId,
-        organization_id: organizationId,
-        station_id: stationId,
-        amount,
-        date,
-        note: note || null,
-        created_by: userId,
-        cashflow_id: cfRow.id,
-      });
-  } catch (e) {
-    console.warn('[paySupplier] supplier_payments sync failed (non-critical):', e?.message);
+  const cashflowId = row?.cashflow_id ?? null;
+  if (cashflowId && (walletFrom || paymentType)) {
+    const patch = {};
+    if (walletFrom) patch.wallet_from = walletFrom;
+    if (paymentType) patch.payment_type = paymentType;
+    await supabase.from('cashflow').update(patch).eq('id', cashflowId);
   }
 
-  // Step 3: Update counterparty balance (non-critical — balance can be recalculated).
-  try {
-    const { data: cp } = await supabase
-      .from('counterparties')
-      .select('balance')
-      .eq('id', supplierId)
-      .single();
-    if (cp != null) {
-      await supabase
-        .from('counterparties')
-        .update({ balance: Number(cp.balance ?? 0) - Number(amount) })
-        .eq('id', supplierId);
-    }
-  } catch (e) {
-    console.warn('[paySupplier] balance update failed (non-critical):', e?.message);
-  }
-
-  return { id: cfRow.id };
+  return { id: cashflowId ?? row?.id ?? null };
 }
-
 

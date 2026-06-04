@@ -55,6 +55,8 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
 import { formatDateTime, formatLiters, formatMoney } from '@/lib/formatters';
 import { PullToRefresh } from '@/components/ui/PullToRefresh';
+import { supabase } from '@/lib/supabaseClient';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 
 
 export default function ShiftsScreen() {
@@ -89,20 +91,25 @@ export default function ShiftsScreen() {
   const [filterDateTo, setFilterDateTo] = useState(() => {
     return new Date().toISOString().split('T')[0];
   });
+  // Дебаунс: пока пользователь правит дату через native date picker, мы
+  // не дёргаем тяжёлый reload на каждое полу-валидное значение. Через
+  // 350мс простоя — выполняется один запрос.
+  const debouncedDateFrom = useDebouncedValue(filterDateFrom, 350);
+  const debouncedDateTo   = useDebouncedValue(filterDateTo, 350);
   const [filterShiftKey, setFilterShiftKey] = useState('');
 
   useEffect(() => {
     if (!orgId) return;
-    import('@/lib/supabaseClient').then(({ supabase }) =>
-      supabase
-        .from('profiles')
-        .select('id, user_id, full_name, email')
-        .eq('organization_id', orgId)
-        .eq('status', 'active')
-        .then(({ data }) => {
-          if (data) setCashiers(data);
-        })
-    );
+    let cancelled = false;
+    supabase
+      .from('profiles')
+      .select('id, user_id, full_name, email')
+      .eq('organization_id', orgId)
+      .eq('status', 'active')
+      .then(({ data }) => {
+        if (!cancelled && data) setCashiers(data);
+      });
+    return () => { cancelled = true; };
   }, [orgId]);
 
   const reload = useCallback(async () => {
@@ -116,8 +123,8 @@ export default function ShiftsScreen() {
       const defaultTo = new Date();
       defaultTo.setHours(23, 59, 59, 999);
 
-      const queryFrom = filterDateFrom ? new Date(filterDateFrom).toISOString() : defaultFrom.toISOString();
-      const queryTo = filterDateTo ? new Date(filterDateTo + 'T23:59:59.999Z').toISOString() : defaultTo.toISOString();
+      const queryFrom = debouncedDateFrom ? new Date(debouncedDateFrom).toISOString() : defaultFrom.toISOString();
+      const queryTo = debouncedDateTo ? new Date(debouncedDateTo + 'T23:59:59.999Z').toISOString() : defaultTo.toISOString();
 
       const [cur, list, pend] = await Promise.all([
         getCurrentShiftFromBalance({ stationId }).catch(() => null),
@@ -140,7 +147,7 @@ export default function ShiftsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [stationId, canReview, filterDateFrom, filterDateTo]);
+  }, [stationId, canReview, debouncedDateFrom, debouncedDateTo]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -220,12 +227,10 @@ export default function ShiftsScreen() {
       const keys = shifts.flatMap((s) => s.mergedKeys ?? [s.shiftKey]);
       if (keys.length === 0) { setReportByKey(new Map()); return; }
       const uniq = [...new Set(keys)];
-      const { data } = await import('@/lib/supabaseClient').then(({ supabase }) =>
-        supabase
-          .from('shift_reports')
-          .select('*')
-          .in('external_shift_key', uniq),
-      );
+      const { data } = await supabase
+        .from('shift_reports')
+        .select('*')
+        .in('external_shift_key', uniq);
       if (cancelled) return;
       const m = new Map();
       for (const r of data ?? []) m.set(r.external_shift_key, r);
@@ -721,6 +726,10 @@ function CloseoutSheet({ shift, organizationId, stationId, onClose, onDone }) {
   const [lines, setLines] = useState([]); // {tmpId, kind, category, amount, payment_type, note}
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+  // Подтверждение того, что оператор проверил данные перед сдачей.
+  // Раньше можно было закрыть смену с пустыми полями — теперь требуем
+  // явное подтверждение по списку.
+  const [confirmed, setConfirmed] = useState({ cashCounted: false, zReady: false });
 
   useEffect(() => {
     if (shift) {
@@ -729,6 +738,7 @@ function CloseoutSheet({ shift, organizationId, stationId, onClose, onDone }) {
         collection_total: '', cash_remaining: '', comment: '',
       });
       setLines([]);
+      setConfirmed({ cashCounted: false, zReady: false });
       setErr('');
     }
   }, [shift]);
@@ -757,6 +767,26 @@ function CloseoutSheet({ shift, organizationId, stationId, onClose, onDone }) {
   async function submit() {
     if (!shift) return;
     if (total <= 0) { setErr('Введите хотя бы одну фактическую сумму выручки'); return; }
+    if (form.cash_remaining === '' || form.cash_remaining === null) {
+      setErr('Укажите остаток наличных в кассе (можно 0, если касса пустая)');
+      return;
+    }
+    if (!confirmed.cashCounted) {
+      setErr('Подтвердите, что наличные пересчитаны');
+      return;
+    }
+    if (!confirmed.zReady) {
+      setErr('Подтвердите, что Z-отчёт снят / готов к загрузке');
+      return;
+    }
+    // Если фактическая разница cashflow > 200 сом — требуем комментарий.
+    // Иначе закрытие смены превращается в формальность.
+    const diff = Math.abs((Number(form.actual_cash) || 0) - expensesTotal + incomeTotal
+                  - (Number(form.collection_total) || 0) - (Number(form.cash_remaining) || 0));
+    if (diff > 200 && !(form.comment || '').trim()) {
+      setErr(`Расхождение по кассе ${formatMoney(diff)}. Опишите причину в комментарии.`);
+      return;
+    }
     setSaving(true); setErr('');
     try {
       const payload = {
@@ -911,6 +941,35 @@ function CloseoutSheet({ shift, organizationId, stationId, onClose, onDone }) {
             />
           </label>
         </div>
+      </SectionCard>
+
+      {/* 5. Чеклист перед сдачей. Оператор обязан явно подтвердить
+          ключевые шаги — это снижает риск «сдал на автомате с нулями». */}
+      <SectionCard num="5" icon={CheckCircle2} title="Перед сдачей">
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={confirmed.cashCounted}
+            onChange={(e) => setConfirmed((c) => ({ ...c, cashCounted: e.target.checked }))}
+            className="w-5 h-5 mt-0.5 accent-brand-500 flex-shrink-0"
+          />
+          <span className="text-xs text-ink leading-relaxed">
+            <span className="font-bold">Наличные пересчитаны.</span>{' '}
+            <span className="text-ink-soft">Остаток в кассе и инкассация подтверждены физически.</span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={confirmed.zReady}
+            onChange={(e) => setConfirmed((c) => ({ ...c, zReady: e.target.checked }))}
+            className="w-5 h-5 mt-0.5 accent-brand-500 flex-shrink-0"
+          />
+          <span className="text-xs text-ink leading-relaxed">
+            <span className="font-bold">Z-отчёт снят.</span>{' '}
+            <span className="text-ink-soft">Загрузите фото отдельно через «Документы» после сдачи.</span>
+          </span>
+        </label>
       </SectionCard>
     </FormSheet>
   );

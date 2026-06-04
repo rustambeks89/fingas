@@ -5,7 +5,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   Send,
@@ -16,7 +15,6 @@ import {
   Check,
   CheckCheck,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/status/EmptyState';
 import { useChat } from '@/hooks/useChat';
 import { useAuth } from '@/hooks/useAuth';

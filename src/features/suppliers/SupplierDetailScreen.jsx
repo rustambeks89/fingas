@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Building2, ChevronLeft, CreditCard, Download, Landmark, Pencil, Plus, RefreshCw, Star, Truck } from 'lucide-react';
+import { Building2, ChevronLeft, CreditCard, Download, Landmark, Pencil, Plus, RefreshCw, Star, Trash2, Truck } from 'lucide-react';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/status/EmptyState';
 import { FormSheet } from '@/components/bottom-sheets/FormSheet';
+import { deleteCashflowWithSync, listWallets, updateCashflow } from '@/services/cashflowService';
 import {
   createBankAccount,
   deleteBankAccount,
@@ -32,7 +33,7 @@ import { PullToRefresh } from '@/components/ui/PullToRefresh';
 
 export default function SupplierDetailScreen() {
   const { user } = useAuth();
-  const { canCreate, canExport } = usePermissions();
+  const { canCreate, canExport, canEdit, canDelete } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();
   const { id } = useParams();
@@ -44,6 +45,10 @@ export default function SupplierDetailScreen() {
   const [err, setErr] = useState('');
   const [payOpen, setPayOpen] = useState(false);
   const [bankSheet, setBankSheet] = useState(null); // null | {} | account
+  const [editingPayment, setEditingPayment] = useState(null);
+
+  const mayEditPayment = canEdit(MODULES.CASHFLOW);
+  const mayDeletePayment = canDelete(MODULES.CASHFLOW);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -81,6 +86,17 @@ export default function SupplierDetailScreen() {
       window.removeEventListener('fingas-data-changed', handleUpdate);
     };
   }, [reload]);
+
+  async function handleDeletePayment(ev) {
+    if (!confirm(`Удалить оплату на ${formatMoney(Math.abs(ev.amount))}?`)) return;
+    try {
+      await deleteCashflowWithSync(ev.id);
+      window.dispatchEvent(new Event('fingas-data-changed'));
+      await reload();
+    } catch (e) {
+      setErr(e?.message ?? 'Не удалось удалить оплату');
+    }
+  }
 
   function exportStatement() {
     if (!events.length) return;
@@ -283,11 +299,37 @@ export default function SupplierDetailScreen() {
                     <div className="text-[11px] text-ink-soft truncate">{e.detail}</div>
                   )}
                 </div>
-                <div className="text-right">
-                  <div className={'font-semibold ' + (e.amount >= 0 ? 'text-warning' : 'text-success')}>
-                    {e.amount >= 0 ? '+' : '−'}{formatMoney(Math.abs(e.amount))}
+                <div className="text-right flex items-start gap-2">
+                  <div>
+                    <div className={'font-semibold ' + (e.amount >= 0 ? 'text-warning' : 'text-success')}>
+                      {e.amount >= 0 ? '+' : '−'}{formatMoney(Math.abs(e.amount))}
+                    </div>
+                    <Badge>{formatMoney(e.running)}</Badge>
                   </div>
-                  <Badge>{formatMoney(e.running)}</Badge>
+                  {e.kind === 'payment' && (mayEditPayment || mayDeletePayment) && (
+                    <div className="flex flex-col gap-1 ml-1">
+                      {mayEditPayment && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingPayment(e)}
+                          className="h-7 w-7 rounded-lg bg-bg-elevated/70 border border-line/40 hover:bg-bg-elevated flex items-center justify-center"
+                          aria-label="Редактировать оплату"
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-ink-muted" />
+                        </button>
+                      )}
+                      {mayDeletePayment && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePayment(e)}
+                          className="h-7 w-7 rounded-lg bg-danger/10 border border-danger/30 hover:bg-danger/20 flex items-center justify-center"
+                          aria-label="Удалить оплату"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-danger" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </Card>
@@ -304,6 +346,14 @@ export default function SupplierDetailScreen() {
         organizationId={user?.profile?.organization_id}
         stationId={user?.profile?.station_id}
         userId={user?.id}
+      />
+
+      <EditPaymentSheet
+        open={!!editingPayment}
+        payment={editingPayment}
+        organizationId={user?.profile?.organization_id}
+        onClose={() => setEditingPayment(null)}
+        onSaved={async () => { setEditingPayment(null); await reload(); }}
       />
 
       <BankAccountSheet
@@ -341,6 +391,9 @@ function PaySheet({ open, onClose, onDone, supplierId, suggested, organizationId
   const today = new Date().toISOString().slice(0, 10);
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(today);
+  const [walletFrom, setWalletFrom] = useState('');
+  const [paymentType, setPaymentType] = useState('cash');
+  const [wallets, setWallets] = useState([]);
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
@@ -349,11 +402,27 @@ function PaySheet({ open, onClose, onDone, supplierId, suggested, organizationId
     if (open) {
       setAmount(suggested > 0 ? String(suggested) : '');
       setDate(today);
+      setWalletFrom('');
+      setPaymentType('cash');
       setNote('');
       setErr('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, suggested]);
+
+  useEffect(() => {
+    if (!open || !organizationId) return;
+    let cancelled = false;
+    listWallets({ organizationId, active: true })
+      .then((rows) => {
+        if (cancelled) return;
+        setWallets(rows ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setWallets([]);
+      });
+    return () => { cancelled = true; };
+  }, [open, organizationId]);
 
   async function submit() {
     setSaving(true);
@@ -363,7 +432,11 @@ function PaySheet({ open, onClose, onDone, supplierId, suggested, organizationId
       if (!num || num <= 0) throw new Error('Сумма должна быть > 0');
       await paySupplier({
         supplierId, organizationId, stationId, userId,
-        amount: num, date, note,
+        amount: num,
+        date,
+        walletFrom: walletFrom || null,
+        paymentType: paymentType || 'cash',
+        note,
       });
       onDone?.();
     } catch (e) {
@@ -375,12 +448,96 @@ function PaySheet({ open, onClose, onDone, supplierId, suggested, organizationId
 
   return (
     <FormSheet open={open} onClose={onClose} title="Оплата поставщику" onSubmit={submit} saving={saving} error={err}>
-      <Input label="Сумма" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} required />
       <Input label="Дата" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+      <Input label="Сумма" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+      <Select label="Из кошелька" value={walletFrom} onChange={(e) => setWalletFrom(e.target.value)}>
+        <option value="">— Выберите кошелёк —</option>
+        {wallets.map((wallet) => <option key={wallet.id} value={wallet.id}>{wallet.name}</option>)}
+      </Select>
+      <Select label="Способ оплаты" value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
+        <option value="cash">Наличные</option>
+        <option value="card">Карта</option>
+        <option value="qr">QR</option>
+        <option value="bank">Банк</option>
+      </Select>
       <Input label="Комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
       <div className="text-xs text-ink-soft">
         Запись попадёт в supplier_payments + автоматически отразится в cashflow и
         уменьшит сальдо поставщика (через триггер 0010).
+      </div>
+    </FormSheet>
+  );
+}
+
+function EditPaymentSheet({ open, payment, organizationId, onClose, onSaved }) {
+  const [date, setDate] = useState('');
+  const [amount, setAmount] = useState('');
+  const [walletFrom, setWalletFrom] = useState('');
+  const [paymentType, setPaymentType] = useState('cash');
+  const [note, setNote] = useState('');
+  const [wallets, setWallets] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!open || !payment) return;
+    setDate(payment.date ?? '');
+    setAmount(String(Math.abs(payment.amount ?? 0)));
+    setWalletFrom(payment.walletFrom ?? '');
+    setPaymentType(payment.paymentType ?? 'cash');
+    setNote(payment.note ?? '');
+    setErr('');
+  }, [open, payment]);
+
+  useEffect(() => {
+    if (!open || !organizationId) return;
+    let cancelled = false;
+    listWallets({ organizationId, active: true })
+      .then((rows) => { if (!cancelled) setWallets(rows ?? []); })
+      .catch(() => { if (!cancelled) setWallets([]); });
+    return () => { cancelled = true; };
+  }, [open, organizationId]);
+
+  async function submit() {
+    if (!payment) return;
+    setSaving(true);
+    setErr('');
+    try {
+      const num = Number(amount);
+      if (!num || num <= 0) throw new Error('Сумма должна быть > 0');
+      await updateCashflow(payment.id, {
+        date,
+        amount: num,
+        wallet_from: walletFrom || null,
+        payment_type: paymentType || null,
+        note: note || null,
+      });
+      onSaved?.();
+    } catch (e) {
+      setErr(e?.message ?? 'Не удалось сохранить');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <FormSheet open={open} onClose={onClose} title="Редактировать оплату" onSubmit={submit} saving={saving} error={err}>
+      <Input label="Дата" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+      <Input label="Сумма" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+      <Select label="Из кошелька" value={walletFrom} onChange={(e) => setWalletFrom(e.target.value)}>
+        <option value="">— Не указан —</option>
+        {wallets.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+      </Select>
+      <Select label="Способ оплаты" value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
+        <option value="cash">Наличные</option>
+        <option value="card">Карта</option>
+        <option value="qr">QR</option>
+        <option value="bank">Банк</option>
+      </Select>
+      <Input label="Комментарий" value={note} onChange={(e) => setNote(e.target.value)} />
+      <div className="text-[11px] text-ink-soft leading-relaxed">
+        Баланс поставщика пересчитается автоматически после сохранения
+        (триггер из миграции 0040).
       </div>
     </FormSheet>
   );

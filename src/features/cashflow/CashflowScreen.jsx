@@ -24,6 +24,8 @@ import {
   Trash2,
   Wallet,
   Calendar,
+  SlidersHorizontal,
+  X as XIcon,
 } from 'lucide-react';
 import {
   Area,
@@ -43,6 +45,7 @@ import { deleteCashflowWithSync, listCashflow, listWallets, updateCashflow } fro
 import { PullToRefresh } from '@/components/ui/PullToRefresh';
 import { Input, Select } from '@/components/ui/Input';
 import { listCounterparties } from '@/services/counterpartyService';
+import { listStations } from '@/services/stationService';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
@@ -147,9 +150,31 @@ export default function CashflowScreen() {
   const [rows, setRows] = useState([]);
   const [wallets, setWallets] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [allCounterparties, setAllCounterparties] = useState([]);
+  const [stations, setStations] = useState([]);
+
+  // Расширенные фильтры (поверх selector'а типа операции). Применяются
+  // клиент-сайд к уже загруженной за период подборке — данные ужe в памяти,
+  // дополнительный HTTP-запрос не нужен.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [extra, setExtra] = useState({
+    stationId: '',
+    counterpartyId: '',
+    walletId: '',
+    paymentType: '',
+    category: '',
+  });
+  const activeExtraCount = useMemo(
+    () => Object.values(extra).filter((v) => v && v !== '').length,
+    [extra],
+  );
   const [editingRow, setEditingRow] = useState(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editDeleting, setEditDeleting] = useState(false);
+  // Сколько строк истории показывать. Полный визуальный рендер 500+ rows
+  // с анимациями уходит в frame-budget — поэтому даём «Показать ещё»
+  // вместо разового всё-или-50.
+  const [shownCount, setShownCount] = useState(50);
   const [editErr, setEditErr] = useState('');
   const [editForm, setEditForm] = useState({
     date: '',
@@ -168,14 +193,18 @@ export default function CashflowScreen() {
     if (!silent) setLoading(true);
     setErr('');
     try {
-      const [cashflow, w, s] = await Promise.all([
+      const [cashflow, w, s, allCp, st] = await Promise.all([
         listCashflow({ limit: 5000, fromDate: fetchFrom() }).catch(() => []),
         orgId ? listWallets({ organizationId: orgId, active: true }).catch(() => []) : [],
         orgId ? listCounterparties({ organizationId: orgId, type: 'supplier', active: true }).catch(() => []) : [],
+        orgId ? listCounterparties({ organizationId: orgId, active: true }).catch(() => []) : [],
+        orgId ? listStations(orgId).catch(() => []) : [],
       ]);
       setRows(cashflow);
       setWallets(w);
       setSuppliers(s);
+      setAllCounterparties(allCp);
+      setStations(st);
     } catch (e) {
       setErr(e?.message ?? 'Не удалось загрузить');
     } finally {
@@ -262,12 +291,25 @@ export default function CashflowScreen() {
       .sort((a, b) => b.amount - a.amount);
   }, [periodRows]);
 
+  // При смене фильтров возвращаемся к началу — не помним позицию.
+  useEffect(() => { setShownCount(50); }, [filter, extra, period]);
+
   const visibleRows = useMemo(() => {
-    if (filter === 'all') return periodRows;
-    if (filter === 'income') return periodRows.filter((r) => POSITIVE_OPS.has(r.operation_type));
-    if (filter === 'expense') return periodRows.filter((r) => !POSITIVE_OPS.has(r.operation_type) && r.operation_type !== 'transfer');
-    return periodRows.filter((r) => r.operation_type === filter);
-  }, [periodRows, filter]);
+    let list = periodRows;
+    if (filter === 'income') list = list.filter((r) => POSITIVE_OPS.has(r.operation_type));
+    else if (filter === 'expense') list = list.filter((r) => !POSITIVE_OPS.has(r.operation_type) && r.operation_type !== 'transfer');
+    else if (filter !== 'all') list = list.filter((r) => r.operation_type === filter);
+
+    if (extra.stationId) list = list.filter((r) => r.station_id === extra.stationId);
+    if (extra.counterpartyId) list = list.filter((r) => r.counterparty_id === extra.counterpartyId);
+    if (extra.walletId) list = list.filter((r) => r.wallet_from === extra.walletId || r.wallet_to === extra.walletId);
+    if (extra.paymentType) list = list.filter((r) => r.payment_type === extra.paymentType);
+    if (extra.category) {
+      const needle = extra.category.toLowerCase();
+      list = list.filter((r) => String(r.cashflow_category ?? '').toLowerCase().includes(needle));
+    }
+    return list;
+  }, [periodRows, filter, extra]);
 
   function exportCSV() {
     downloadCSV(`cashflow-${period}-${todayStamp()}`, visibleRows, [
@@ -368,16 +410,33 @@ export default function CashflowScreen() {
       <ScreenHeader
         title="Кэшфлоу"
         subtitle="Аналитика денежных потоков"
-        right={canExport(MODULES.CASHFLOW) && visibleRows.length > 0 ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={exportCSV}
-            className="h-10 w-10 p-0 flex items-center justify-center rounded-xl bg-bg-card border border-line/30 hover:bg-bg-elevated active:scale-95 transition-all shadow-sm"
-          >
-            <Download className="w-4.5 h-4.5 text-ink-muted" />
-          </Button>
-        ) : null}
+        right={(
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setFiltersOpen(true)}
+              className="relative h-10 w-10 p-0 flex items-center justify-center rounded-xl bg-bg-card border border-line/30 hover:bg-bg-elevated active:scale-95 transition-all shadow-sm"
+            >
+              <SlidersHorizontal className="w-4.5 h-4.5 text-ink-muted" />
+              {activeExtraCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] rounded-full bg-brand-500 text-white text-[9px] font-black flex items-center justify-center px-1 shadow-glow">
+                  {activeExtraCount}
+                </span>
+              )}
+            </Button>
+            {canExport(MODULES.CASHFLOW) && visibleRows.length > 0 && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={exportCSV}
+                className="h-10 w-10 p-0 flex items-center justify-center rounded-xl bg-bg-card border border-line/30 hover:bg-bg-elevated active:scale-95 transition-all shadow-sm"
+              >
+                <Download className="w-4.5 h-4.5 text-ink-muted" />
+              </Button>
+            )}
+          </div>
+        )}
       />
 
       {err && (
@@ -623,21 +682,93 @@ export default function CashflowScreen() {
         {visibleRows.length === 0 ? (
           <Empty loading={loading} text="За выбранный период операций не найдено" />
         ) : (
-          <div className="space-y-2.5">
-            {visibleRows.slice(0, 50).map((r, i) => (
-              <OpRow
-                key={r.id ?? i}
-                row={r}
-                index={i}
-                canEdit={canEdit(MODULES.CASHFLOW)}
-                canDelete={canDelete(MODULES.CASHFLOW)}
-                onEdit={() => openEditRow(r)}
-                onDelete={() => removeRowQuick(r)}
-              />
-            ))}
-          </div>
+          <>
+            <div className="space-y-2.5">
+              {visibleRows.slice(0, shownCount).map((r, i) => (
+                <OpRow
+                  key={r.id ?? i}
+                  row={r}
+                  index={i}
+                  canEdit={canEdit(MODULES.CASHFLOW)}
+                  canDelete={canDelete(MODULES.CASHFLOW)}
+                  onEdit={() => openEditRow(r)}
+                  onDelete={() => removeRowQuick(r)}
+                />
+              ))}
+            </div>
+            {visibleRows.length > shownCount && (
+              <button
+                type="button"
+                onClick={() => setShownCount((c) => c + 100)}
+                className="w-full mt-3 rounded-2xl border border-line/40 bg-bg-card hover:border-brand-500/40 hover:bg-bg-elevated/50 px-4 py-3 text-xs font-bold text-ink-muted transition-colors"
+              >
+                Показать ещё {Math.min(100, visibleRows.length - shownCount)} из {visibleRows.length - shownCount}
+              </button>
+            )}
+          </>
         )}
       </Card>
+
+      <FormSheet
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        title="Фильтры операций"
+        onSubmit={() => setFiltersOpen(false)}
+        submitLabel="Применить"
+        footer={activeExtraCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => setExtra({ stationId: '', counterpartyId: '', walletId: '', paymentType: '', category: '' })}
+            className="w-full text-xs font-bold text-ink-muted hover:text-danger flex items-center justify-center gap-1.5 py-2"
+          >
+            <XIcon className="w-3.5 h-3.5" /> Сбросить все фильтры
+          </button>
+        ) : null}
+      >
+        <Select
+          label="Станция"
+          value={extra.stationId}
+          onChange={(e) => setExtra((c) => ({ ...c, stationId: e.target.value }))}
+        >
+          <option value="">Все станции</option>
+          {stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </Select>
+        <Select
+          label="Контрагент"
+          value={extra.counterpartyId}
+          onChange={(e) => setExtra((c) => ({ ...c, counterpartyId: e.target.value }))}
+        >
+          <option value="">Все контрагенты</option>
+          {allCounterparties.map((cp) => <option key={cp.id} value={cp.id}>{cp.name}</option>)}
+        </Select>
+        <Select
+          label="Кошелёк"
+          value={extra.walletId}
+          onChange={(e) => setExtra((c) => ({ ...c, walletId: e.target.value }))}
+        >
+          <option value="">Все кошельки</option>
+          {wallets.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+        </Select>
+        <Select
+          label="Способ оплаты"
+          value={extra.paymentType}
+          onChange={(e) => setExtra((c) => ({ ...c, paymentType: e.target.value }))}
+        >
+          <option value="">Любой способ</option>
+          <option value="cash">Наличные</option>
+          <option value="card">Карта</option>
+          <option value="qr">QR</option>
+          <option value="bank">Банк</option>
+          <option value="transfer">Перевод</option>
+          <option value="other">Другое</option>
+        </Select>
+        <Input
+          label="Категория содержит"
+          value={extra.category}
+          onChange={(e) => setExtra((c) => ({ ...c, category: e.target.value }))}
+          placeholder="Например: топливо, аренда…"
+        />
+      </FormSheet>
 
       <FormSheet
         open={!!editingRow}

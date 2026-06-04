@@ -27,7 +27,6 @@ import {
   Fuel,
   Coins,
   DollarSign,
-  AlertTriangle,
 } from 'lucide-react';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Card } from '@/components/ui/Card';
@@ -38,6 +37,7 @@ import { computeFifoCost } from '@/services/salesService';
 import { aggregateBalanceByDay, aggregateBalanceByMonth } from '@/services/shiftService';
 import { listFuelSupply } from '@/services/fuelService';
 import { listTaxes } from '@/services/taxService';
+import { localYMD } from '@/lib/fingasUtils';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
@@ -67,6 +67,7 @@ export default function PLScreen() {
   const { user } = useAuth();
   const { canExport } = usePermissions();
   const stationId = user?.profile?.station_id;
+  const organizationId = user?.profile?.organization_id;
   const [period, setPeriod] = useState('30d');
   const [data, setData] = useState({
     revenue: 0, liters: 0, cost: 0, expenses: 0, salaries: 0, taxes: 0,
@@ -84,12 +85,6 @@ export default function PLScreen() {
       const { from, to } = periodRange(period);
       const fromISO = from.toISOString();
       const toISO = to.toISOString();
-      const localYMD = (d) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-      };
       const fromDate = localYMD(from);
       const toDate = localYMD(to);
 
@@ -102,16 +97,25 @@ export default function PLScreen() {
       const balanceLiters = dayAgg.reduce((sum, day) => sum + Number(day.liters ?? 0), 0);
 
       const supplies = await listFuelSupply({ stationId, limit: 1000 }).catch(() => []);
-      const flatCost = supplies
-        .filter((s) => s.date >= fromDate && s.date <= toDate)
-        .reduce((s, r) => s + Number(r.total_amount ?? 0), 0);
 
       const fifo = await computeFifoCost({
         stationId, from: fromDate, to: toDate,
       }).catch(() => ({ total: 0, byFuel: {} }));
 
-      const cost = fifo.total > 0 ? fifo.total : flatCost;
-      const mode = fifo.total > 0 ? 'fifo' : 'flat';
+      // Если FIFO не дал результата (например, нет истории поставок до периода),
+      // считаем себестоимость как средневзвешенную цену поставок этой станции
+      // ВКЛЮЧАЯ старые периоды × проданные литры. Это корректно для
+      // управленческого учёта — оплата поставщику в cashflow остаётся в Cashflow,
+      // в P&L отражается только COGS проданного.
+      let cost = Number(fifo.total ?? 0);
+      let mode = 'fifo';
+      if (cost <= 0 && balanceLiters > 0 && supplies.length > 0) {
+        const supTotal = supplies.reduce((s, r) => s + Number(r.total_amount ?? 0), 0);
+        const supLiters = supplies.reduce((s, r) => s + Number(r.liters_actual ?? 0), 0);
+        const avgCost = supLiters > 0 ? supTotal / supLiters : 0;
+        cost = avgCost * balanceLiters;
+        mode = 'weighted';
+      }
 
       const fuelBd = Object.entries(fifo.byFuel ?? {})
         .map(([fuel, v]) => ({
@@ -122,16 +126,23 @@ export default function PLScreen() {
         }))
         .sort((a, b) => b.cost - a.cost);
 
-      const { data: cf } = await supabase
+      // P&L-расходы: только настоящие операционные расходы и зарплаты.
+      // supplier_payment / tax_payment — это движение денег, они идут в Cashflow
+      // (и учитываются ниже отдельной строкой taxes). Покупка топлива
+      // капитализируется в склад и списывается через COGS.
+      let cfQuery = supabase
         .from('cashflow')
-        .select('operation_type, amount, date')
+        .select('operation_type, amount, date, station_id, organization_id')
         .gte('date', fromDate)
         .lte('date', toDate);
+      if (organizationId) cfQuery = cfQuery.eq('organization_id', organizationId);
+      if (stationId) cfQuery = cfQuery.eq('station_id', stationId);
+      const { data: cf } = await cfQuery;
       let expenses = 0, salaries = 0;
       for (const r of cf ?? []) {
         const amt = Number(r.amount ?? 0);
         if (r.operation_type === 'salary') salaries += amt;
-        else if (['expense', 'supplier_payment'].includes(r.operation_type)) expenses += amt;
+        else if (r.operation_type === 'expense') expenses += amt;
       }
 
       const taxList = await listTaxes({ limit: 1000 }).catch(() => []);
@@ -171,7 +182,10 @@ export default function PLScreen() {
         const k = String(c.date).slice(0, 7);
         if (monthsMap[k]) {
           const amt = Number(c.amount ?? 0);
-          if (['expense', 'supplier_payment', 'salary', 'tax'].includes(c.operation_type)) {
+          // То же правило что и в основном P&L — supplier_payment
+          // не учитывается, COGS учитывается отдельно через monthly cost
+          // (поставки агрегированы выше как proxy для нагрузки месяца).
+          if (['expense', 'salary', 'tax'].includes(c.operation_type)) {
             monthsMap[k].expenses += amt;
           }
         }
@@ -186,7 +200,7 @@ export default function PLScreen() {
     } finally {
       setLoading(false);
     }
-  }, [period, stationId]);
+  }, [period, stationId, organizationId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -431,7 +445,9 @@ export default function PLScreen() {
           <Card className="p-4 shadow-card border border-line/30 bg-bg-card/75 space-y-3.5">
             <div>
               <span className="text-xs font-black text-ink uppercase tracking-wider block">Маржинальность по сортам топлива</span>
-              <span className="text-[10px] text-ink-soft block mt-0.5">Оценка себестоимости по методу {costMode === 'fifo' ? 'FIFO' : 'по среднему'}</span>
+              <span className="text-[10px] text-ink-soft block mt-0.5">
+                Себестоимость рассчитана методом {costMode === 'fifo' ? 'FIFO' : costMode === 'weighted' ? 'средневзвешенной цены поставок' : 'оценочно по поставкам'}
+              </span>
             </div>
             <div className="space-y-2 pt-1">
               {fuelBreakdown.map((f) => {

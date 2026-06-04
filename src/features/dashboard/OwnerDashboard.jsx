@@ -18,7 +18,6 @@ import {
   AlertTriangle,
   Building2,
   ChevronRight,
-  ChevronDown,
   ClipboardList,
   Droplets,
   Receipt,
@@ -29,17 +28,17 @@ import {
   Wallet,
   Sparkles,
   FileText,
+  Wrench,
+  Gauge,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { TankCard, TankCardSkeleton } from '@/components/charts/TankCard';
-import { Wrench, Gauge } from 'lucide-react';
 
 // Quick forms and bottom sheet for reservoir click triggers
 import { BottomSheet } from '@/components/bottom-sheets/BottomSheet';
 import { TankMeasurementQuickForm } from '@/features/quick-add/forms/TankMeasurementQuickForm';
 import { CalibrationQuickForm } from '@/features/quick-add/forms/CalibrationQuickForm';
-import { CashflowQuickForm } from '@/features/quick-add/forms/CashflowQuickForm';
 import { TankAdjustmentQuickForm } from '@/features/quick-add/forms/TankAdjustmentQuickForm';
 import { getTankStatusesWithBalance } from '@/services/tankService';
 import { listEmployees } from '@/services/profileService';
@@ -50,7 +49,9 @@ import {
   getCurrentSalesShift,
 } from '@/services/shiftService';
 import { aggregateForShift } from '@/services/salesService';
+import { listCounterparties } from '@/services/counterpartyService';
 import { supabase } from '@/lib/supabaseClient';
+import { runWhenIdle } from '@/lib/fingasUtils';
 import { useAuth } from '@/hooks/useAuth';
 import { formatMoney, formatLiters } from '@/lib/formatters';
 import { PROFILE_STATUS, ROLE_LABELS } from '@/lib/constants';
@@ -72,13 +73,6 @@ const REPORTS = [
   { to: '/taxes',           label: 'Налоги',                icon: Receipt,       desc: 'Платежи и периоды' },
   { to: '/documents',       label: 'Документы',             icon: FileText,      desc: 'Накладные · чеки · акты' },
 ];
-
-const TANK_STATUS_META = {
-  ok: { label: 'нормально', tone: 'success' },
-  low: { label: 'низко', tone: 'warning' },
-  critical: { label: 'критично', tone: 'danger' },
-  unknown: { label: 'нет замера', tone: 'default' },
-};
 
 // Реальные границы периода:
 //   day   — сегодня с 00:00 до сейчас
@@ -112,11 +106,10 @@ export default function OwnerDashboard() {
 
   const navigate = useNavigate();
   const [period, setPeriod] = useState('week');
-  const [showAllReports, setShowAllReports] = useState(false);
   const [selectedTank, setSelectedTank] = useState(null);
   const [activeFormType, setActiveFormType] = useState(null);
   const [currentShift, setCurrentShift] = useState(null);
-  const [currentShiftLoading, setCurrentShiftLoading] = useState(false);  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const handleUpdate = () => setRefreshKey((k) => k + 1);
@@ -139,6 +132,7 @@ export default function OwnerDashboard() {
   const [alerts, setAlerts] = useState([]);
   const [tanks, setTanks] = useState([]);
   const [tanksLoading, setTanksLoading] = useState(true);
+  const [debts, setDebts] = useState({ suppliers: [], customers: [], supplierTotal: 0, customerTotal: 0 });
 
   const [stationName, setStationName] = useState(null);
 
@@ -253,22 +247,19 @@ export default function OwnerDashboard() {
   useEffect(() => {
     if (!stationId) { setCurrentShift(null); return; }
     let cancelled = false;
-    setCurrentShiftLoading(true);
     getCurrentSalesShift({ stationId })
       .then((shift) => {
         if (!cancelled) setCurrentShift(shift);
       })
       .catch(() => {
         if (!cancelled) setCurrentShift(null);
-      })
-      .finally(() => {
-        if (!cancelled) setCurrentShiftLoading(false);
       });
     return () => { cancelled = true; };
   }, [stationId, refreshKey]);
 
-  // 4. Алерты — три параллельных независимых запроса. Каждый шлёт свой
-  //    апдейт в общий список, а не ждёт остальных.
+  // 4. Алерты — три параллельных независимых запроса. Откладываем до idle:
+  //    счётчики «нужно одобрить» не критичны для первого paint и не должны
+  //    задерживать прокрутку тренда выручки и резервуаров.
   useEffect(() => {
     let cancelled = false;
     const collected = { shifts: 0, requests: 0, collTotal: 0 };
@@ -294,27 +285,66 @@ export default function OwnerDashboard() {
       setAlerts(a);
     }
 
-    listPendingShiftReports({}).then((rows) => {
-      collected.shifts = rows?.length ?? 0; rebuild();
-    }).catch(() => {});
+    const cancelIdle = runWhenIdle(() => {
+      if (cancelled) return;
 
-    if (orgId) {
-      listEmployees({ organizationId: orgId, status: PROFILE_STATUS.PENDING })
-        .then((rows) => { collected.requests = rows?.length ?? 0; rebuild(); })
-        .catch(() => {});
-    }
+      listPendingShiftReports({}).then((rows) => {
+        if (cancelled) return;
+        collected.shifts = rows?.length ?? 0; rebuild();
+      }).catch(() => {});
 
-    supabase
-      .from('cashflow')
-      .select('amount')
-      .eq('operation_type', 'collection')
-      .eq('status', 'pending_confirmation')
-      .then(({ data }) => {
-        collected.collTotal = (data ?? []).reduce((s, r) => s + Number(r.amount ?? 0), 0);
-        rebuild();
+      if (orgId) {
+        listEmployees({ organizationId: orgId, status: PROFILE_STATUS.PENDING })
+          .then((rows) => {
+            if (cancelled) return;
+            collected.requests = rows?.length ?? 0; rebuild();
+          })
+          .catch(() => {});
+      }
+
+      supabase
+        .from('cashflow')
+        .select('amount')
+        .eq('operation_type', 'collection')
+        .eq('status', 'pending_confirmation')
+        .then(({ data }) => {
+          if (cancelled) return;
+          collected.collTotal = (data ?? []).reduce((s, r) => s + Number(r.amount ?? 0), 0);
+          rebuild();
+        });
+    });
+
+    return () => { cancelled = true; cancelIdle(); };
+  }, [orgId, refreshKey]);
+
+  // 5. Долги контрагентов — топ-3 поставщиков и топ-3 клиентов.
+  //    Тоже до idle: на холодной загрузке важнее показать выручку и баки,
+  //    блок долгов появится через долю секунды.
+  useEffect(() => {
+    if (!orgId) { setDebts({ suppliers: [], customers: [], supplierTotal: 0, customerTotal: 0 }); return; }
+    let cancelled = false;
+    const cancelIdle = runWhenIdle(() => {
+      if (cancelled) return;
+      Promise.all([
+        listCounterparties({ organizationId: orgId, type: 'supplier', active: true }).catch(() => []),
+        listCounterparties({ organizationId: orgId, type: 'customer', active: true }).catch(() => []),
+      ]).then(([suppliers, customers]) => {
+        if (cancelled) return;
+        const supDebts = suppliers
+          .filter((s) => Number(s.balance ?? 0) > 0)
+          .sort((a, b) => Number(b.balance) - Number(a.balance));
+        const custDebts = customers
+          .filter((c) => Number(c.balance ?? 0) > 0)
+          .sort((a, b) => Number(b.balance) - Number(a.balance));
+        setDebts({
+          suppliers: supDebts.slice(0, 3),
+          customers: custDebts.slice(0, 3),
+          supplierTotal: supDebts.reduce((s, x) => s + Number(x.balance ?? 0), 0),
+          customerTotal: custDebts.reduce((s, x) => s + Number(x.balance ?? 0), 0),
+        });
       });
-
-    return () => { cancelled = true; };
+    });
+    return () => { cancelled = true; cancelIdle(); };
   }, [orgId, refreshKey]);
 
   // Add tank-derived alerts
@@ -511,6 +541,37 @@ export default function OwnerDashboard() {
           </div>
         )}
       </Card>
+
+      {/* COUNTERPARTY DEBTS PANEL */}
+      {(debts.suppliers.length > 0 || debts.customers.length > 0) && (
+        <Card className="!p-4 shadow-card border border-line/30 bg-bg-card/75 backdrop-blur-2xl">
+          <SectionTitle
+            icon={Wallet}
+            title="Долги контрагентов"
+            right={`${debts.suppliers.length + debts.customers.length}`}
+          />
+          <div className="grid grid-cols-1 gap-3 mt-1">
+            {debts.suppliers.length > 0 && (
+              <DebtBlock
+                title="Нам должны заплатить (поставщикам)"
+                items={debts.suppliers}
+                total={debts.supplierTotal}
+                tone="warn"
+                navigate={navigate}
+              />
+            )}
+            {debts.customers.length > 0 && (
+              <DebtBlock
+                title="Должны нам (клиенты)"
+                items={debts.customers}
+                total={debts.customerTotal}
+                tone="info"
+                navigate={navigate}
+              />
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* QUICK REPORTS TILES PANEL */}
       <Card className="!p-4 shadow-card border border-line/30 bg-bg-card/75 backdrop-blur-2xl">
@@ -748,6 +809,58 @@ function ChartSkeleton() {
   );
 }
 
+function DebtBlock({ title, items, total, tone = 'warn', navigate }) {
+  const wrapCls =
+    tone === 'warn' ? 'border-warning/30 bg-warning/5' :
+    tone === 'info' ? 'border-info/30 bg-info/5' :
+    'border-line/30 bg-bg-card/50';
+  const accentCls =
+    tone === 'warn' ? 'text-warning' :
+    tone === 'info' ? 'text-info' :
+    'text-ink';
+
+  return (
+    <div className={`rounded-2xl border ${wrapCls} p-3 backdrop-blur-xl`}>
+      <div className="flex items-center justify-between mb-2 gap-2 min-w-0">
+        <span className="text-[10px] uppercase tracking-[0.18em] font-black text-ink-soft truncate">
+          {title}
+        </span>
+        <span className={`text-xs font-extrabold tabular-nums flex-shrink-0 ${accentCls}`}>
+          {formatMoney(total)}
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        {items.map((it) => {
+          const share = total > 0 ? (Number(it.balance ?? 0) / total) * 100 : 0;
+          return (
+            <button
+              key={it.id}
+              type="button"
+              onClick={() => navigate(`/suppliers/${it.id}`)}
+              className="w-full text-left group"
+            >
+              <div className="flex items-center justify-between text-xs gap-2 min-w-0">
+                <span className="text-ink font-bold truncate group-hover:text-brand-400 transition-colors">
+                  {it.name}
+                </span>
+                <span className={`font-extrabold tabular-nums flex-shrink-0 ${accentCls}`}>
+                  {formatMoney(it.balance)}
+                </span>
+              </div>
+              <div className="mt-1 h-1 bg-bg-elevated/80 dark:bg-black/40 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${tone === 'warn' ? 'bg-warning' : 'bg-info'}`}
+                  style={{ width: `${share}%` }}
+                />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AlertRow({ alert }) {
   const { tone, icon: Icon, title, desc, to } = alert;
   const wrap =
@@ -774,63 +887,6 @@ function AlertRow({ alert }) {
         <ChevronRight className="w-4.5 h-4.5 text-ink-soft flex-shrink-0 group-hover:translate-x-0.5 transition-transform duration-200" />
       </motion.div>
     </Link>
-  );
-}
-
-function TankSummaryRow({ name, number, fuel, fuelColor, current, capacity, status = 'unknown' }) {
-  const meta = TANK_STATUS_META[status] ?? TANK_STATUS_META.unknown;
-  const hasReading = Number(current) > 0;
-  const pct = capacity > 0 ? Math.min(100, Math.max(0, (current / capacity) * 100)) : 0;
-
-  return (
-    <div className="rounded-2xl border border-line/30 bg-bg-card/60 p-3.5 hover:border-brand-500/20 transition-all duration-200 shadow-sm relative overflow-hidden group">
-      {/* Background tracking percentage bar */}
-      <div
-        className="absolute left-0 top-0 bottom-0 bg-bg-soft/40 dark:bg-white/[0.015] -z-10 transition-all duration-500"
-        style={{ width: `${pct}%` }}
-      />
-      <div className="flex items-center gap-3 min-w-0 relative">
-        {/* Glowing Fuel indicator indicator */}
-        <div
-          className="w-3 h-3 rounded-full flex-shrink-0 shadow-glow animate-pulse"
-          style={{
-            background: fuelColor,
-            boxShadow: `0 0 10px ${fuelColor}aa`
-          }}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-black text-ink truncate">
-            {fuel || '—'}{number != null ? ` · №${number}` : ''}{name ? ` · ${name}` : ''}
-          </div>
-        </div>
-        <div className="text-[10px] text-ink-muted font-bold tabular-nums whitespace-nowrap flex-shrink-0">
-          {hasReading ? formatLiters(current) : '—'} / {capacity > 0 ? formatLiters(capacity) : '—'}
-        </div>
-        <div className="text-[10px] font-black text-ink tabular-nums whitespace-nowrap flex-shrink-0">
-          {Math.round(pct)}%
-        </div>
-        <Badge
-          tone={meta.tone}
-          className="text-[8px] font-black tracking-wider uppercase px-2 py-0.5 flex-shrink-0 shadow-inner animate-none"
-        >
-          {meta.label}
-        </Badge>
-      </div>
-    </div>
-  );
-}
-
-function TankSummarySkeleton() {
-  return (
-    <div className="rounded-2xl border border-line/30 bg-bg-card/50 px-3.5 py-3 shadow-sm">
-      <div className="flex items-center gap-2 min-w-0">
-        <div className="w-2.5 h-2.5 rounded-full bg-bg-elevated animate-pulse flex-shrink-0" />
-        <div className="h-3 rounded bg-bg-elevated animate-pulse flex-1 min-w-0" />
-        <div className="h-3 rounded bg-bg-elevated animate-pulse w-24 flex-shrink-0" />
-        <div className="h-4 rounded bg-bg-elevated animate-pulse w-10 flex-shrink-0" />
-        <div className="h-5 rounded-full bg-bg-elevated animate-pulse w-16 flex-shrink-0" />
-      </div>
-    </div>
   );
 }
 

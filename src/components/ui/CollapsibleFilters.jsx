@@ -6,7 +6,7 @@
 // их при наличии reset-колбэка.
 
 import { useState } from 'react';
-import { ChevronDown, SlidersHorizontal, X } from 'lucide-react';
+import { SlidersHorizontal, X } from 'lucide-react';
 import { Card } from './Card';
 import { Button } from './Button';
 
@@ -14,7 +14,6 @@ export function CollapsibleFilters({
   children,
   activeCount = 0,
   onReset,
-  label = 'Фильтры',
   defaultOpen = false,
   className = '',
 }) {

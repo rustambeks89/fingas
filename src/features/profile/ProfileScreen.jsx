@@ -28,8 +28,7 @@ import {
   uploadAvatar,
 } from '@/services/profileService';
 import { supabase } from '@/lib/supabaseClient';
-import { ROLES, ROLE_LABELS, PROFILE_STATUS, PROFILE_STATUS_LABELS } from '@/lib/constants';
-import { formatMoney } from '@/lib/formatters';
+import { ROLE_LABELS, PROFILE_STATUS, PROFILE_STATUS_LABELS } from '@/lib/constants';
 
 export default function ProfileScreen() {
   const { user, signOut, refresh } = useAuth();
@@ -116,7 +115,6 @@ export default function ProfileScreen() {
 
   const p = user?.profile;
   const role = p?.role;
-  const isOperator = role === ROLES.OPERATOR;
   const station = expanded?.station;
   const organization = expanded?.organization;
 
@@ -271,11 +269,3 @@ function InfoRow({ icon: Icon, label, value }) {
   );
 }
 
-function Stat({ label, value }) {
-  return (
-    <div className="rounded-xl bg-bg-elevated border border-line/35 p-2.5">
-      <div className="text-[9px] uppercase tracking-wide text-ink-soft">{label}</div>
-      <div className="text-xs font-semibold text-ink mt-0.5">{value}</div>
-    </div>
-  );
-}

@@ -12,8 +12,10 @@ import {
   Clock,
   Calendar,
   Zap,
-  ChevronRight,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient';
 import { ScreenHeader } from '@/components/layout/ScreenHeader';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -26,6 +28,8 @@ import { MODULES } from '@/lib/constants';
 import { formatDateTime, formatLiters, formatMoney, formatTime, parsePosDate } from '@/lib/formatters';
 import { downloadCSV, todayStamp } from '@/lib/exporters';
 import { PullToRefresh } from '@/components/ui/PullToRefresh';
+import { BottomSheet } from '@/components/bottom-sheets/BottomSheet';
+import { listSales } from '@/services/salesService';
 
 const PERIODS = [
   { id: 'week', label: '7 дней' },
@@ -137,11 +141,27 @@ export default function SalesScreen() {
   const isOperator = user?.profile?.role === 'operator';
 
   const [period, setPeriod] = useState('week');
-  const [loading, setLoading] = useState(true);
+  // На холодном открытии загружаем мгновенно из sessionStorage-снимка
+  // (stale-while-revalidate). Спинер не блокирует UI если есть прошлый
+  // снимок — пользователь видит знакомые цифры, а в фоне идёт refresh.
+  const cacheKey = stationId ? `fingas:sales:${stationId}:${period}` : null;
+  const initialSnap = (() => {
+    if (typeof sessionStorage === 'undefined' || !cacheKey) return null;
+    try {
+      const raw = sessionStorage.getItem(cacheKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
+  const [loading, setLoading] = useState(!initialSnap);
   const [err, setErr] = useState('');
   const [expanded, setExpanded] = useState(false);
-  const [currentShift, setCurrentShift] = useState(null);
-  const [history, setHistory] = useState([]);
+  const [currentShift, setCurrentShift] = useState(initialSnap?.currentShift ?? null);
+  const [history, setHistory] = useState(initialSnap?.history ?? []);
+  const [openShiftKey, setOpenShiftKey] = useState(null);
+  // Свежесть данных от POS — если sync с MySQL встал, пользователь часто
+  // видит «застрявшую» смену и не понимает почему. Показываем явно:
+  // когда была последняя транзакция в azs_selling и последний sync в azs_balance.
+  const [freshness, setFreshness] = useState({ lastTxAt: null, lastSyncedAt: null });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -177,6 +197,18 @@ export default function SalesScreen() {
 
       setCurrentShift(visibleCurrent);
       setHistory(archivedOnly);
+
+      // Снимок в sessionStorage — следующее открытие на этой вкладке
+      // покажет цифры мгновенно, в фоне обновится.
+      if (cacheKey && typeof sessionStorage !== 'undefined') {
+        try {
+          sessionStorage.setItem(cacheKey, JSON.stringify({
+            currentShift: visibleCurrent,
+            history: archivedOnly,
+            savedAt: Date.now(),
+          }));
+        } catch { /* quota — ignore */ }
+      }
     } catch (e) {
       setErr(e?.message ?? 'Ошибка загрузки');
       setCurrentShift(null);
@@ -195,6 +227,50 @@ export default function SalesScreen() {
     window.addEventListener('fingas-data-changed', handleUpdate);
     return () => window.removeEventListener('fingas-data-changed', handleUpdate);
   }, [load]);
+
+  // Freshness probe — два лёгких запроса по 1 строке. Идёт отдельно,
+  // не задерживает основной load. Обновляется при каждом mount и при
+  // глобальном fingas-data-changed.
+  useEffect(() => {
+    let cancelled = false;
+    async function probe() {
+      try {
+        let shopKey = null;
+        if (stationId) {
+          const { data: st } = await supabase
+            .from('stations')
+            .select('external_station_id')
+            .eq('id', stationId)
+            .maybeSingle();
+          shopKey = st?.external_station_id ?? null;
+        }
+        let txQ = supabase.from('azs_selling').select('TransactionDatetime, ShiftKey');
+        let balQ = supabase.from('azs_balance').select('synced_at, ShiftKey');
+        if (shopKey != null) {
+          txQ = txQ.eq('ShopKey', shopKey);
+          balQ = balQ.eq('ShopKey', shopKey);
+        }
+        const [lastTxQ, lastBalQ] = await Promise.all([
+          txQ.order('TransactionDatetime', { ascending: false }).limit(1).maybeSingle(),
+          balQ.order('synced_at', { ascending: false }).limit(1).maybeSingle(),
+        ]);
+        if (cancelled) return;
+        setFreshness({
+          lastTxAt: lastTxQ?.data?.TransactionDatetime ?? null,
+          lastTxShiftKey: lastTxQ?.data?.ShiftKey ?? null,
+          lastSyncedAt: lastBalQ?.data?.synced_at ?? null,
+          lastSyncedShiftKey: lastBalQ?.data?.ShiftKey ?? null,
+        });
+      } catch { /* ignore */ }
+    }
+    probe();
+    const onUpdate = () => probe();
+    window.addEventListener('fingas-data-changed', onUpdate);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('fingas-data-changed', onUpdate);
+    };
+  }, [stationId]);
 
   const allRows = useMemo(
     () => (currentShift ? [currentShift, ...history] : history),
@@ -229,12 +305,14 @@ export default function SalesScreen() {
         </div>
       )}
 
+      <PosFreshnessBadge freshness={freshness} onReload={load} />
+
       {loading ? (
         <SalesScreenSkeleton />
       ) : (
         <>
           {currentShift && !isOperator ? (
-            <LiveSalesCard shift={currentShift} />
+            <LiveSalesCard shift={currentShift} onOpen={() => setOpenShiftKey(currentShift.shiftKey)} />
           ) : !isOperator ? (
             <Card className="relative overflow-hidden border border-line/30 bg-bg-card/50">
               <div className="absolute -top-16 -right-16 w-32 h-32 rounded-full bg-brand-500/5 blur-3xl pointer-events-none" />
@@ -331,7 +409,7 @@ export default function SalesScreen() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: idx * 0.04 }}
                         >
-                          <ArchivedShiftRow shift={shift} />
+                          <ArchivedShiftRow shift={shift} onOpen={() => setOpenShiftKey(shift.shiftKey)} />
                         </motion.div>
                       ))}
                     </div>
@@ -351,8 +429,252 @@ export default function SalesScreen() {
           </Card>
         </>
       )}
+
+      <ShiftDetailSheet
+        shiftKey={openShiftKey}
+        rows={allRows}
+        onClose={() => setOpenShiftKey(null)}
+      />
     </div>
     </PullToRefresh>
+  );
+}
+
+function ShiftDetailSheet({ shiftKey, rows, onClose }) {
+  const shift = rows.find((r) => r?.shiftKey === shiftKey) ?? null;
+  const [transactions, setTransactions] = useState([]);
+  const [loadingTx, setLoadingTx] = useState(false);
+
+  // Транзакции тяжёлые — грузим только когда sheet реально открыт. До тех
+  // пор useEffect не дёргает supabase и список Sales остаётся быстрым.
+  useEffect(() => {
+    if (!shiftKey) { setTransactions([]); return; }
+    let cancelled = false;
+    setLoadingTx(true);
+    listSales({
+      shiftKey,
+      limit: 1000,
+      columns: 'TransactionDatetime, FuelName, Volume, ShopCost, BasePaymentTypeKey, OperatorName',
+    })
+      .then((data) => { if (!cancelled) setTransactions(data ?? []); })
+      .catch(() => { if (!cancelled) setTransactions([]); })
+      .finally(() => { if (!cancelled) setLoadingTx(false); });
+    return () => { cancelled = true; };
+  }, [shiftKey]);
+
+  const open = !!shiftKey && !!shift;
+  if (!open) return <BottomSheet open={false} onClose={onClose} title="" />;
+
+  const fuelEntries = Object.entries(shift.fuels ?? {})
+    .map(([fuel, v]) => ({ fuel, ...v }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  const paymentSplit = transactions.reduce((acc, t) => {
+    const k = String(t.BasePaymentTypeKey ?? '—');
+    acc[k] = (acc[k] ?? 0) + Number(t.ShopCost ?? 0);
+    return acc;
+  }, {});
+  const PAYMENT_LABEL = {
+    '1': 'Наличные', '0': 'Наличные', '2': 'Карта', '3': 'QR',
+    '4': 'Талон', '5': 'Безнал', '6': 'Кредит',
+  };
+
+  const startedAt = shift.firstAt ?? shift.balanceAt ?? null;
+  const endedAt = shift.lastAt ?? shift.firstAt ?? null;
+  const operator = shift.operatorFinal ?? shift.operatorOriginal ?? shift.operator ?? '—';
+
+  return (
+    <BottomSheet open={open} onClose={onClose} title={`Смена #${shift.shiftKey}`}>
+      <div className="space-y-4 pb-2">
+        {/* Шапка: оператор и даты */}
+        <div className="rounded-2xl bg-bg-elevated/50 border border-line/30 p-3.5">
+          <div className="flex items-center gap-2 text-sm font-extrabold text-ink">
+            <UserCircle2 className="w-4 h-4 text-brand-400 flex-shrink-0" />
+            <span className="truncate">{operator}</span>
+          </div>
+          <div className="text-[10px] text-ink-soft mt-1.5 font-bold flex items-center gap-1">
+            <Calendar className="w-3 h-3 flex-shrink-0" />
+            {startedAt
+              ? `${formatDateTime(startedAt)}${endedAt ? ` → ${formatTime(endedAt)}` : ''}`
+              : 'дата отсутствует'}
+          </div>
+        </div>
+
+        {/* KPI */}
+        <div className="grid grid-cols-3 gap-2">
+          <KpiTile icon={TrendingUp} label="Выручка" value={formatMoney(shift.revenue)} tone="success" />
+          <KpiTile icon={Fuel} label="Литры" value={formatLiters(shift.liters)} tone="brand" />
+          <KpiTile icon={Clock} label="Чеки" value={Number(shift.count ?? 0).toLocaleString('ru-RU')} tone="info" />
+        </div>
+
+        {(shift.calibrationDeducted ?? 0) > 0 && (
+          <div className="rounded-2xl border border-warning/30 bg-warning/5 px-3.5 py-2.5 text-[11px] text-warning leading-relaxed">
+            <span className="font-extrabold">Вычтено поверкой:</span>{' '}
+            {formatLiters(shift.calibrationDeducted)} · {formatMoney(shift.calibrationDeductedRevenue ?? 0)}
+          </div>
+        )}
+
+        {/* Разбивка по топливу */}
+        {fuelEntries.length > 0 && (
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft font-black mb-2 px-1">
+              По видам топлива
+            </div>
+            <div className="space-y-2">
+              {fuelEntries.map((f) => {
+                const share = shift.revenue > 0 ? (f.revenue / shift.revenue) * 100 : 0;
+                const avgPrice = f.liters > 0 ? f.revenue / f.liters : 0;
+                return (
+                  <div key={f.fuel} className="rounded-2xl border border-line/30 bg-bg-card/50 p-3">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="text-xs font-extrabold text-ink truncate">{f.fuel || '—'}</span>
+                      <span className="text-xs font-extrabold text-brand-400 tabular-nums">
+                        {formatMoney(f.revenue)}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-ink-soft font-bold tabular-nums mb-1.5">
+                      {formatLiters(f.liters)} · средняя цена {formatMoney(avgPrice, 'сом/л')}
+                    </div>
+                    <div className="h-1.5 rounded-full bg-bg-elevated/80 overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-brand-400 to-brand-500 rounded-full" style={{ width: `${share}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Способы оплаты — только если есть транзакции */}
+        {Object.keys(paymentSplit).length > 0 && (
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft font-black mb-2 px-1">
+              По способам оплаты
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(paymentSplit)
+                .sort((a, b) => b[1] - a[1])
+                .map(([k, v]) => (
+                  <div key={k} className="rounded-xl border border-line/30 bg-bg-card/50 px-3 py-2.5 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-ink-muted uppercase tracking-wider truncate">
+                      {PAYMENT_LABEL[k] ?? `Тип ${k}`}
+                    </span>
+                    <span className="text-xs font-extrabold text-ink tabular-nums flex-shrink-0">
+                      {formatMoney(v)}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {/* Последние транзакции — компактный список */}
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-ink-soft font-black mb-2 px-1 flex items-center justify-between">
+            <span>Транзакции</span>
+            <span className="text-ink-muted">{transactions.length}</span>
+          </div>
+          {loadingTx ? (
+            <div className="text-[11px] text-ink-soft text-center py-4">Загружаю транзакции…</div>
+          ) : transactions.length === 0 ? (
+            <div className="text-[11px] text-ink-soft text-center py-4">
+              В azs_selling нет данных по этой смене.
+            </div>
+          ) : (
+            <div className="space-y-1 max-h-72 overflow-y-auto -mx-1 px-1">
+              {transactions.slice(0, 100).map((t, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 text-[11px] py-1.5 border-b border-line/15">
+                  <span className="text-ink-soft tabular-nums flex-shrink-0 w-14">{formatTime(t.TransactionDatetime)}</span>
+                  <span className="text-ink font-bold truncate flex-1 min-w-0">{t.FuelName || '—'}</span>
+                  <span className="text-ink-muted tabular-nums flex-shrink-0 w-16 text-right">{formatLiters(t.Volume)}</span>
+                  <span className="text-ink font-extrabold tabular-nums flex-shrink-0 w-20 text-right">{formatMoney(t.ShopCost)}</span>
+                </div>
+              ))}
+              {transactions.length > 100 && (
+                <div className="text-[10px] text-ink-soft text-center pt-2">
+                  Показаны первые 100 из {transactions.length}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </BottomSheet>
+  );
+}
+
+function KpiTile({ icon: Icon, label, value, tone = 'default' }) {
+  const color =
+    tone === 'success' ? 'text-success border-success/20 bg-success/5' :
+    tone === 'brand'   ? 'text-brand-500 border-brand-500/20 bg-brand-500/5' :
+    tone === 'info'    ? 'text-info border-info/20 bg-info/5' :
+    'text-ink border-line/30 bg-bg-card';
+  return (
+    <div className={`rounded-2xl border p-2.5 ${color}`}>
+      <div className="flex items-center gap-1.5">
+        {Icon && <Icon className="w-3 h-3 flex-shrink-0" />}
+        <span className="text-[9px] uppercase tracking-wider font-black text-ink-soft truncate">{label}</span>
+      </div>
+      <div className="mt-1.5 text-sm font-black tabular-nums truncate">{value}</div>
+    </div>
+  );
+}
+
+function PosFreshnessBadge({ freshness, onReload }) {
+  if (!freshness?.lastTxAt && !freshness?.lastSyncedAt) return null;
+
+  const now = Date.now();
+  const txAt = freshness.lastTxAt ? new Date(freshness.lastTxAt).getTime() : null;
+  const syncAt = freshness.lastSyncedAt ? new Date(freshness.lastSyncedAt).getTime() : null;
+  // Самое свежее = пользователю важно знать «когда POS последний раз дышал».
+  const newest = Math.max(txAt ?? 0, syncAt ?? 0);
+  if (!newest) return null;
+
+  const ageMin = Math.floor((now - newest) / 60000);
+  const ageLabel =
+    ageMin < 1 ? 'только что' :
+    ageMin < 60 ? `${ageMin} мин назад` :
+    ageMin < 24 * 60 ? `${Math.floor(ageMin / 60)} ч назад` :
+    `${Math.floor(ageMin / 1440)} д назад`;
+
+  // > 60 мин = подозрительно долго без свежих данных. Включаем warning.
+  const stale = ageMin >= 60;
+  const tone = stale ? 'warning' : 'info';
+  const wrapCls = stale
+    ? 'border-warning/40 bg-warning/10'
+    : 'border-line/30 bg-bg-card/70';
+  const dotCls = stale ? 'bg-warning' : 'bg-success';
+
+  return (
+    <div className={`rounded-2xl border ${wrapCls} px-3.5 py-2.5 flex items-center gap-2.5 backdrop-blur-xl`}>
+      <span className={`relative flex h-2 w-2 flex-shrink-0`}>
+        <span className={`${stale ? '' : 'animate-ping'} absolute inline-flex h-full w-full rounded-full ${dotCls} opacity-60`} />
+        <span className={`relative inline-flex rounded-full h-2 w-2 ${dotCls}`} />
+      </span>
+      <div className="flex-1 min-w-0 text-[11px] leading-tight">
+        <div className="font-bold text-ink truncate">
+          {stale ? (
+            <span className="text-warning">POS-данные устарели · {ageLabel}</span>
+          ) : (
+            <span>Последнее обновление POS · {ageLabel}</span>
+          )}
+        </div>
+        <div className="text-ink-soft text-[10px] mt-0.5 font-bold tabular-nums">
+          {freshness.lastTxShiftKey != null ? `Selling: смена #${freshness.lastTxShiftKey}` : ''}
+          {freshness.lastSyncedShiftKey != null ? ` · Balance: #${freshness.lastSyncedShiftKey}` : ''}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onReload}
+        className="flex-shrink-0 h-8 px-2.5 rounded-xl border border-line/40 bg-bg-elevated/70 hover:bg-bg-elevated text-ink-muted hover:text-ink text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition-colors"
+      >
+        <RefreshCw className="w-3 h-3" /> Обновить
+      </button>
+      {stale && (
+        <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0" />
+      )}
+    </div>
   );
 }
 
@@ -409,7 +731,7 @@ function getFuelStyles(fuelName) {
   };
 }
 
-function LiveSalesCard({ shift }) {
+function LiveSalesCard({ shift, onOpen }) {
   const fuelEntries = Object.entries(shift?.fuels ?? {}).sort((a, b) => b[1].liters - a[1].liters);
   const totalLiters = Number(shift?.liters ?? 0) || 1;
   const operator = shift?.operatorFinal ?? shift?.operatorOriginal ?? shift?.operator ?? '—';
@@ -418,7 +740,11 @@ function LiveSalesCard({ shift }) {
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-3xl border border-brand-500/20 bg-gradient-to-br from-brand-50/70 via-bg-card/95 to-brand-100/30 p-5 relative overflow-hidden backdrop-blur-2xl shadow-card transition-all duration-350 hover:shadow-md dark:border-brand-500/40 dark:from-brand-600/20 dark:via-bg-card/95 dark:to-brand-700/10 dark:shadow-card-premium dark:hover:shadow-[0_24px_50px_-12px_rgba(239, 68, 68, 0.3)]"
+      onClick={() => onOpen?.()}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(); }}
+      className="rounded-3xl border border-brand-500/20 bg-gradient-to-br from-brand-50/70 via-bg-card/95 to-brand-100/30 p-5 relative overflow-hidden backdrop-blur-2xl shadow-card transition-all duration-350 hover:shadow-md cursor-pointer active:scale-[0.99] dark:border-brand-500/40 dark:from-brand-600/20 dark:via-bg-card/95 dark:to-brand-700/10 dark:shadow-card-premium dark:hover:shadow-[0_24px_50px_-12px_rgba(239, 68, 68, 0.3)]"
     >
       {/* Dynamic ambient lights */}
       <div className="absolute -top-24 -left-24 w-48 h-48 rounded-full bg-brand-500/15 blur-3xl pointer-events-none animate-pulse" />
@@ -522,7 +848,6 @@ function TopOperatorsCard({ leaders }) {
       {leaders.length > 0 ? (
         <div className="space-y-2.5">
           {leaders.map((leader, index) => {
-            const isTop3 = index < 3;
             const colors = [
               // 1st Place - Gold
               {
@@ -619,17 +944,17 @@ function TopOperatorsCard({ leaders }) {
   );
 }
 
-function ArchivedShiftRow({ shift }) {
+function ArchivedShiftRow({ shift, onOpen }) {
   const operator = shift?.operatorFinal ?? shift?.operatorOriginal ?? shift?.operator ?? '—';
-  // Даты — приоритет azs_shift.DatetimeShiftBegin/End (firstAt/lastAt). balanceAt
-  // = synced_at из azs_balance, это момент репликации в Supabase, а не реальное
-  // время смены — оставляем как fallback на случай если строки в azs_shift нет.
   const startedAt = shift?.firstAt ?? shift?.balanceAt ?? null;
   const endedAt = shift?.lastAt ?? shift?.firstAt ?? shift?.balanceAt ?? startedAt;
   const showChecks = Boolean(shift?.hasSellingTime);
 
   return (
-    <div className="rounded-2xl bg-bg-card/50 border border-line/30 hover:border-brand-500/20 dark:bg-[#0F1832]/40 dark:border-white/[0.02] dark:hover:border-brand-500/25 p-4 flex flex-col gap-3 transition-all duration-200 shadow-sm relative group cursor-pointer">
+    <button
+      type="button"
+      onClick={() => onOpen?.(shift)}
+      className="w-full text-left rounded-2xl bg-bg-card/50 border border-line/30 hover:border-brand-500/20 dark:bg-[#0F1832]/40 dark:border-white/[0.02] dark:hover:border-brand-500/25 p-4 flex flex-col gap-3 transition-all duration-200 shadow-sm relative group cursor-pointer active:scale-[0.99]">
       {/* Subtle indicator bar on hover */}
       <div className="absolute left-0 top-3 bottom-3 w-1 rounded-r-lg bg-brand-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
 
@@ -678,7 +1003,7 @@ function ArchivedShiftRow({ shift }) {
           )}
         </div>
       )}
-    </div>
+    </button>
   );
 }
 

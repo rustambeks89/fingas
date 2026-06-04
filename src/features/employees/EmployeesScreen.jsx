@@ -8,10 +8,8 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Users, Check } from 'lucide-react';
 import {
-  blockEmployee,
   listEmployees,
   rejectEmployee,
-  unblockEmployee,
 } from '@/services/profileService';
 import {
   getEmployeePayRate,
@@ -114,16 +112,6 @@ export default function EmployeesScreen({ embedded = false } = {}) {
     await rejectEmployee(p.id);
     await reload();
   }
-  async function block(p) {
-    if (!confirm(`Заблокировать ${p.full_name || p.email}?`)) return;
-    await blockEmployee(p.id);
-    await reload();
-  }
-  async function unblock(p) {
-    await unblockEmployee(p.id);
-    await reload();
-  }
-
   function badgeFor(id) {
     const n =
       id === 'requests' ? counts.requests :

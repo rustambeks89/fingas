@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
+import { inspectDirectoryUsage, describeUsage } from '@/lib/directoryGuards';
 
 const KIND_META = {
   income:  { label: 'Приход',          icon: ArrowDownRight, tone: 'success' },
@@ -208,9 +209,34 @@ function CategorySheet({ open, item, organizationId, onClose, onSaved }) {
 
   async function remove() {
     if (!isEdit) return;
-    if (!confirm(`Удалить статью «${item.name}»?`)) return;
     setDeleting(true);
     try {
+      // cashflow.cashflow_category хранит ИМЯ статьи (строкой), поэтому
+      // проверяем по name. Плюс подкатегории через parent_id.
+      const usage = await inspectDirectoryUsage({
+        refs: [
+          { table: 'cashflow',            column: 'cashflow_category', value: item.name, label: 'операциях' },
+          { table: 'cashflow_categories', column: 'parent_id',         value: item.id,   label: 'подкатегориях' },
+        ],
+      });
+      if (usage.used) {
+        const summary = describeUsage(usage.counts);
+        const ok = confirm(
+          `Статья «${item.name}» используется в ${summary}.\n\nУдалить нельзя — будет дыра в отчётах.\n\nДеактивировать? Будет скрыта из новых форм, история останется целой.`,
+        );
+        if (!ok) { setDeleting(false); return; }
+        const { error } = await supabase
+          .from('cashflow_categories')
+          .update({ active: false })
+          .eq('id', item.id);
+        if (error) throw error;
+        onSaved?.();
+        return;
+      }
+      if (!confirm(`Удалить статью «${item.name}»? Это полное удаление.`)) {
+        setDeleting(false);
+        return;
+      }
       const { error } = await supabase.from('cashflow_categories').delete().eq('id', item.id);
       if (error) throw error;
       onSaved?.();

@@ -103,7 +103,7 @@ export function CalibrationQuickForm({ onDone, onCancel, defaultFuelType = null 
       <Input label="Комментарий" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
 
       <div className="text-xs text-ink-soft">
-        Поверка не учитывается в реальной выручке — для этого добавьте соответствующую строку в sales_exclusions (отдельный экран).
+        Поверка автоматически вычитается из продаж в аналитике и отчётах.
       </div>
 
       {err && (

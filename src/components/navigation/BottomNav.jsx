@@ -24,7 +24,7 @@ export function BottomNav() {
       <nav className="fixed left-0 right-0 bottom-3.5 z-30 px-4">
         <div className="max-w-screen-sm mx-auto">
           <div
-            className="rounded-2xl px-2 py-1.5 relative border border-transparent shadow-lg bg-bg-card/95 backdrop-blur-xl"
+            className="rounded-2xl px-2 py-1.5 relative border border-line/40 shadow-lg bg-bg-card backdrop-blur-xl"
           >
             <ul className="grid grid-cols-5 gap-0 relative z-10 items-end">
               {/* 1. Главная */}
@@ -107,8 +107,8 @@ function TabItem({ to, label, icon: Icon, exact, badge }) {
       end={exact}
       className={({ isActive }) =>
         cn(
-          'relative flex flex-col items-center gap-0.5 py-1.5 rounded-xl text-[9px] uppercase tracking-wider font-bold transition-all duration-200',
-          isActive ? 'text-brand-500' : 'text-ink-muted hover:text-ink',
+          'relative flex flex-col items-center gap-0.5 py-1.5 rounded-xl text-[10px] uppercase tracking-wider font-extrabold transition-all duration-200',
+          isActive ? 'text-brand-500' : 'text-ink hover:text-brand-400',
         )
       }
     >
@@ -116,7 +116,7 @@ function TabItem({ to, label, icon: Icon, exact, badge }) {
         <>
           {isActive && <ActivePill />}
           <div className="relative">
-            <Icon className={cn('relative w-4.5 h-4.5 transition-colors', isActive ? 'text-brand-500' : 'text-ink-muted')} />
+            <Icon className={cn('relative w-4.5 h-4.5 transition-colors', isActive ? 'text-brand-500' : 'text-ink')} />
             {badge && (
               <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-500 opacity-75" />

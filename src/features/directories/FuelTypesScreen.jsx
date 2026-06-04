@@ -17,6 +17,7 @@ import { seedDefaultFuelTypes } from '@/services/tankService';
 import { useAuth } from '@/hooks/useAuth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { MODULES } from '@/lib/constants';
+import { inspectDirectoryUsage, describeUsage } from '@/lib/directoryGuards';
 
 const PRESET_COLORS = ['#22C55E', '#FF4D3D', '#A855F7', '#3B82F6', '#F59E0B', '#EC4899', '#6B7280'];
 
@@ -204,9 +205,31 @@ function FuelTypeSheet({ open, item, organizationId, onClose, onSaved }) {
 
   async function remove() {
     if (!isEdit) return;
-    if (!confirm(`Удалить «${item.code}»?`)) return;
     setDeleting(true);
     try {
+      // Сначала проверяем, есть ли где-то ссылка на этот тип топлива.
+      // Если он используется в резервуарах или истории поставок — жёсткое
+      // удаление сломает отчёты. Предлагаем «отключить» (active=false).
+      const usage = await inspectDirectoryUsage({
+        refs: [
+          { table: 'tanks',       column: 'fuel_type_id', value: item.id, label: 'резервуарах' },
+        ],
+      });
+      if (usage.used) {
+        const summary = describeUsage(usage.counts);
+        const ok = confirm(
+          `Тип «${item.code}» используется в ${summary}.\n\nУдалить нельзя — отчёты потеряют ссылку.\n\nОтключить (active=false)? Тогда он перестанет предлагаться в новых формах, но история останется целой.`,
+        );
+        if (!ok) { setDeleting(false); return; }
+        const { error } = await supabase.from('fuel_types').update({ active: false }).eq('id', item.id);
+        if (error) throw error;
+        onSaved?.();
+        return;
+      }
+      if (!confirm(`Удалить «${item.code}»? Это полное удаление, не откатывается.`)) {
+        setDeleting(false);
+        return;
+      }
       const { error } = await supabase.from('fuel_types').delete().eq('id', item.id);
       if (error) throw error;
       onSaved?.();

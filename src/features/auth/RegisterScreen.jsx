@@ -4,7 +4,6 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { signUp, completeRegistration } from '@/services/authService';
@@ -104,12 +103,7 @@ export default function RegisterScreen() {
     <div className="relative min-h-screen flex flex-col items-center justify-center px-6 py-12 overflow-hidden bg-bg">
       <div className="pointer-events-none absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-brand-500/10 dark:bg-brand-500/5 blur-[120px]" />
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-        className="relative w-full max-w-[400px] z-10"
-      >
+      <div className="relative w-full max-w-[400px] z-10 animate-slide-up">
         <div className="text-center mb-6 flex flex-col items-center justify-center">
           <Wordmark className="text-2xl font-black mx-auto mb-1.5" />
           <p className="text-xs text-ink-soft mt-1 font-semibold uppercase tracking-wider">Создание учетной записи сотрудника</p>
@@ -180,7 +174,7 @@ export default function RegisterScreen() {
             <Link className="text-brand-500 font-bold hover:underline" to="/login">Войти в личный кабинет</Link>
           </p>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }

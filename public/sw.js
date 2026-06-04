@@ -1,63 +1,131 @@
-// [CREATED BY ANTIGRAVITY CLI - 2026-05-27]
+// [UPDATED BY CLAUDE CLI - 2026-06-04]
 // Project: Fingas
 // Purpose: PWA Service Worker handling asset caching & lock-screen Push Notifications.
+//
+// Стратегия:
+//   - Хешированные бандлы (/assets/*-XYZ.js, *.css) — cache-first, immutable.
+//     Vite ставит уникальный хеш в имя файла, при деплое имя меняется,
+//     старая запись больше не запрашивается — её сбрасываем в `activate`.
+//   - HTML (`/`, `/index.html`) — network-first с фоллбэком на cache.
+//     Так пользователь всегда получает свежий entry-point с правильными
+//     именами бандлов после нового деплоя.
+//   - Шрифты Google — cache-first (immutable).
+//   - Всё прочее (Supabase API, иконки, фавиконки) — пропускаем без кэша.
 
-const CACHE_NAME = 'fingas-cache-v1';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/favicon.svg',
-  '/apple-touch-icon.png',
-  '/manifest.json'
-];
+const VERSION = 'v3-2026-06-04';
+const HTML_CACHE = `fingas-html-${VERSION}`;
+const ASSET_CACHE = `fingas-assets-${VERSION}`;
+const FONT_CACHE  = `fingas-fonts-${VERSION}`;
+const CORE_PRECACHE = ['/', '/index.html', '/manifest.json', '/favicon.svg', '/apple-touch-icon.png'];
 
-// Install Event — cache core static assets
+// Install — precache base shell so first offline open работает.
 self.addEventListener('install', (e) => {
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    }).then(() => self.skipWaiting())
+    caches.open(HTML_CACHE)
+      .then((cache) => cache.addAll(CORE_PRECACHE))
+      .then(() => self.skipWaiting())
+      .catch(() => self.skipWaiting()),
   );
 });
 
-// Activate Event — cleanup old caches
+// Activate — чистим всё кроме текущей версии. Старые хешированные бандлы
+// уходят вместе с прошлой версией кэша.
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter((k) => ![HTML_CACHE, ASSET_CACHE, FONT_CACHE].includes(k))
+          .map((k) => caches.delete(k)),
+      ),
+    ).then(() => self.clients.claim()),
   );
 });
 
-// Fetch Event — stale-while-revalidate for static files, bypass for Supabase API
-self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
+function isAssetPath(url) {
+  return url.origin === self.location.origin && url.pathname.startsWith('/assets/');
+}
 
-  // Bypass cache for Supabase / API requests and dynamic data
-  if (url.origin !== self.location.origin || e.request.method !== 'GET') {
+function isHtmlRequest(req, url) {
+  if (req.mode === 'navigate') return true;
+  if (url.origin !== self.location.origin) return false;
+  return url.pathname === '/' || url.pathname.endsWith('.html');
+}
+
+function isGoogleFont(url) {
+  return url.origin === 'https://fonts.googleapis.com' || url.origin === 'https://fonts.gstatic.com';
+}
+
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+
+  const url = new URL(req.url);
+
+  // Supabase REST / Realtime / любые кросс-оригин API — оставляем браузеру.
+  // Кэшировать их через SW опасно (RLS, права).
+  if (
+    !isAssetPath(url) &&
+    !isHtmlRequest(req, url) &&
+    !isGoogleFont(url)
+  ) {
     return;
   }
 
-  e.respondWith(
-    caches.match(e.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Fetch new version in background to update cache
-        fetch(e.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(e.request, networkResponse));
+  // Хешированные ассеты Vite — cache-first, immutable.
+  if (isAssetPath(url)) {
+    e.respondWith(
+      caches.open(ASSET_CACHE).then(async (cache) => {
+        const cached = await cache.match(req);
+        if (cached) return cached;
+        try {
+          const fresh = await fetch(req);
+          if (fresh && fresh.status === 200) cache.put(req, fresh.clone());
+          return fresh;
+        } catch (err) {
+          if (cached) return cached;
+          throw err;
+        }
+      }),
+    );
+    return;
+  }
+
+  // Google Fonts — тоже cache-first (immutable URL'ы с хешем).
+  if (isGoogleFont(url)) {
+    e.respondWith(
+      caches.open(FONT_CACHE).then(async (cache) => {
+        const cached = await cache.match(req);
+        if (cached) return cached;
+        const fresh = await fetch(req);
+        if (fresh && fresh.status === 200) cache.put(req, fresh.clone());
+        return fresh;
+      }),
+    );
+    return;
+  }
+
+  // HTML — network-first, чтобы при деплое новой версии index.html всегда
+  // приехал свежим (он ссылается на новые именa бандлов).
+  if (isHtmlRequest(req, url)) {
+    e.respondWith(
+      fetch(req)
+        .then((fresh) => {
+          if (fresh && fresh.status === 200) {
+            const copy = fresh.clone();
+            caches.open(HTML_CACHE).then((cache) => cache.put(req, copy));
           }
-        }).catch(() => { /* ignore network error when offline */ });
-        return cachedResponse;
-      }
-      return fetch(e.request);
-    })
-  );
+          return fresh;
+        })
+        .catch(async () => {
+          const cached = await caches.match(req);
+          if (cached) return cached;
+          // Fallback на любую закэшированную shell — даже /
+          return caches.match('/index.html') || caches.match('/');
+        }),
+    );
+    return;
+  }
 });
 
 // Push Event — Listen for Web Push notifications sent by the backend / Supabase / Edge function
@@ -86,7 +154,6 @@ self.addEventListener('push', (e) => {
     data: {
       url: data.url || '/'
     },
-    // iOS specific adjustments
     vibrate: [100, 50, 100],
     actions: data.actions || []
   };
@@ -104,7 +171,6 @@ self.addEventListener('notificationclick', (e) => {
 
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If a window is already open, focus it and navigate
       for (const client of clientList) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
           client.focus();
@@ -114,7 +180,6 @@ self.addEventListener('notificationclick', (e) => {
           return;
         }
       }
-      // If no window is open, open a new one
       if (self.clients.openWindow) {
         return self.clients.openWindow(targetUrl);
       }

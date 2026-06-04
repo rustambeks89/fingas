@@ -5,17 +5,7 @@
 // public.stations.external_station_id.
 
 import { supabase } from '@/lib/supabaseClient';
-
-async function resolveShopKey(stationId) {
-  if (!stationId) return null;
-  const { data, error } = await supabase
-    .from('stations')
-    .select('external_station_id')
-    .eq('id', stationId)
-    .maybeSingle();
-  if (error) return null;
-  return data?.external_station_id ?? null;
-}
+import { resolveShopKey } from '@/lib/fingasUtils';
 
 export async function listLatestBalances({ stationId } = {}) {
   const shopKey = await resolveShopKey(stationId);
